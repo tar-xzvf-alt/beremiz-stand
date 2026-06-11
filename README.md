@@ -220,3 +220,96 @@ ok
 Следующий шаг:
 
 - Шаг 3: установить/запустить Beremiz IDE на ПК и создать пустой проект для дальнейшей настройки Modbus TCP обмена.
+
+### Шаг 3. Beremiz IDE И Пустой Проект
+
+Дата: 2026-06-11
+
+Цель: подтвердить наличие рабочей установки Beremiz на ПК и создать начальный пустой PLC-проект для стенда.
+
+Проверенные пакеты на ПК:
+
+| Пакет | Версия |
+| --- | --- |
+| `beremiz` | `1.5-alt0.1.20260530.1.noarch` |
+| `matiec` | `20260503-alt1.x86_64` |
+| `python3-module-wx` | `4.2.2-alt2.x86_64` |
+
+Проверенная системная Python-среда Beremiz:
+
+| Команда | Результат |
+| --- | --- |
+| `/usr/bin/python3 --version` | `Python 3.13.13` |
+| `/usr/bin/python3 -c "import wx; print(wx.version())"` | `4.2.2 gtk3 (phoenix) wxWidgets 3.2.10` |
+
+Важно:
+
+- Команда `python3` из пользовательского окружения указывает на Python `3.10.20` и не видит модуль `wx`.
+- Launcher `/bin/beremiz` явно использует `/usr/bin/python3`, поэтому для Beremiz нужно ориентироваться на системный Python.
+- `/bin/beremiz` является shell-wrapper:
+
+```sh
+#!/bin/sh
+[ -z "$WAYLAND_DISPLAY" ] || export GDK_BACKEND=x11
+/usr/bin/python3 /usr/share/beremiz/Beremiz.py
+```
+
+Созданные артефакты:
+
+- `scripts/create_empty_beremiz_project.py` — воспроизводимый скрипт создания пустого проекта через установленный Beremiz.
+- `beremiz-project/study-plc/beremiz.xml` — корневой конфиг Beremiz-проекта.
+- `beremiz-project/study-plc/plc.xml` — пустой PLCOpen-проект.
+- `beremiz-project/README.md` — краткие команды для проекта.
+
+Команда создания проекта:
+
+```bash
+/usr/bin/python3 scripts/create_empty_beremiz_project.py beremiz-project/study-plc
+```
+
+Содержимое созданного проекта:
+
+```text
+beremiz-project/study-plc/
+  beremiz.xml
+  plc.xml
+  build/
+```
+
+`build/` создается Beremiz как рабочий каталог и исключен из git.
+
+Проверка CLI-загрузки проекта:
+
+```bash
+/usr/bin/python3 /usr/share/beremiz/Beremiz_cli.py --project-home beremiz-project/study-plc clean
+```
+
+Результат:
+
+```text
+Cleaning the build directory
+PLC Status: Disconnected
+```
+
+Команда открытия проекта в IDE:
+
+```bash
+beremiz beremiz-project/study-plc
+```
+
+Проверка успеха:
+
+- Beremiz установлен из системного ALT-пакета.
+- `matiec` установлен и доступен как зависимость Beremiz.
+- Системный `/usr/bin/python3` видит `wxPython`.
+- Пустой проект создан штатным API Beremiz, а не ручным копированием XML.
+- CLI Beremiz успешно загружает проект и выполняет `clean`.
+
+Вывод:
+
+- Базовая среда Beremiz на ПК готова.
+- Есть валидный пустой проект, который можно дальше наполнять PLC-логикой и Modbus TCP конфигурацией.
+
+Следующий шаг:
+
+- Шаг 4: добавить минимальную PLC-логику и подготовить проект к обмену с Modbus TCP simulator.
