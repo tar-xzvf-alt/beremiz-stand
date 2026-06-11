@@ -422,3 +422,175 @@ PLC Status: Disconnected
 Следующий шаг:
 
 - Шаг 5: подготовить target/runtime-сценарий для запуска PLC на VisionFive 2 и проверить доступность Modbus simulator с этого runtime.
+
+### Шаг 5. Запуск PLC Runtime На VisionFive 2
+
+Дата: 2026-06-11
+
+Цель: собрать `study-plc` нативно на `Starfive VisionFive 2`, запустить Beremiz local runtime на плате и подтвердить реальный Modbus TCP обмен с simulator на ПК.
+
+Важное ограничение сети:
+
+- VisionFive 2 подключен к ПК напрямую через Ethernet bridge и не должен полагаться на интернет-доступ.
+- Git/pull с платы может зависать из-за VPN/маршрутизации на ПК.
+- Для переноса стенда на плату используется прямой `scp` с ПК, а не `git clone` на плате.
+
+Пакеты на VisionFive 2 после ручной подготовки:
+
+| Пакет | Версия |
+| --- | --- |
+| `beremiz` | `1.4-alt0.1.20250821.2.noarch` |
+| `matiec` | `20250821-alt1.riscv64` |
+| `beremiz-modbus-source` | `20170318-alt1.noarch` |
+| `python3-module-erpc` | `1.13.0-alt1.noarch` |
+| `python3-module-twisted-core` | `24.11.0-alt2.noarch` |
+| `python3-module-click` | `8.4.1-alt1.noarch` |
+
+Локальный RPM:
+
+- `beremiz-modbus-source-20170318-alt1.noarch.rpm` добавлен в репозиторий стенда как резервный артефакт.
+- На плату он устанавливался командой:
+
+```bash
+scp -q beremiz-modbus-source-20170318-alt1.noarch.rpm root@10.42.0.211:/tmp/beremiz-modbus-source-20170318-alt1.noarch.rpm
+ssh root@10.42.0.211 'rpm -Uvh /tmp/beremiz-modbus-source-20170318-alt1.noarch.rpm'
+```
+
+Перенос рабочей копии на плату:
+
+```bash
+scripts/sync_to_visionfive.sh
+```
+
+Скрипт архивирует текущий каталог, исключая `.git`, `.deps`, `beremiz-project/*/build` и `__pycache__`, затем распаковывает его в `/root/beremiz-stand` на VisionFive 2.
+
+Наблюдение:
+
+- При распаковке на плате `tar` предупреждал о timestamps "в будущем".
+- Это связано с рассинхроном времени: ПК живет в дате `2026-06-11`, а VisionFive 2 во время теста показывал дату `2026-02-27`.
+- На результат сборки/запуска это не повлияло.
+
+Подготовка Modbus C-библиотеки на плате:
+
+```bash
+ssh root@10.42.0.211 'cd /root/beremiz-stand && ./scripts/prepare_modbus_source.sh'
+```
+
+Результат:
+
+```text
+Prepared Modbus library in .deps/Modbus
+```
+
+Нативная сборка PLC на VisionFive 2:
+
+```bash
+ssh root@10.42.0.211 'cd /root/beremiz-stand && rm -rf beremiz-project/study-plc/build && MODBUS_PATH="/root/beremiz-stand/.deps/Modbus" /usr/bin/python3 /usr/share/beremiz/Beremiz_cli.py --project-home beremiz-project/study-plc build'
+```
+
+Проверенный результат:
+
+```text
+Linking :
+   [CC]  plc_main.o plc_debugger.o py_ext.o config.o resource1.o MB_0.o -> study-plc.so
+Successfully built.
+```
+
+Проверка архитектуры build-артефакта:
+
+```bash
+ssh root@10.42.0.211 'file /root/beremiz-stand/beremiz-project/study-plc/build/study-plc.so'
+```
+
+Результат:
+
+```text
+ELF 64-bit LSB shared object, UCB RISC-V, RVC, double-float ABI
+```
+
+Отличие Beremiz CLI на плате:
+
+- На ПК установлен Beremiz `1.5`, где есть команда `clean`.
+- На VisionFive 2 установлен Beremiz `1.4`, где CLI поддерживает только `build`, `connect`, `transfer`, `run`, `stop`.
+- Поэтому на плате очистка делалась удалением `beremiz-project/study-plc/build`, а команда `clean` не использовалась.
+
+Runtime smoke test:
+
+На ПК запущен simulator:
+
+```bash
+python3 modbus-simulator/modbus_server.py --host 0.0.0.0 --port 1502 --verbose
+```
+
+Перед запуском PLC выставлены регистры simulator:
+
+```bash
+python3 modbus-simulator/modbus_client.py 127.0.0.1 --port 1502 write-single 0 600
+python3 modbus-simulator/modbus_client.py 127.0.0.1 --port 1502 write-single 1 0
+python3 modbus-simulator/modbus_client.py 127.0.0.1 --port 1502 read-holding 0 3
+```
+
+Начальное состояние:
+
+```text
+[600, 0, 500]
+```
+
+На VisionFive 2 запущен local runtime через Beremiz CLI:
+
+```bash
+ssh root@10.42.0.211 'cd /root/beremiz-stand && MODBUS_PATH="/root/beremiz-stand/.deps/Modbus" timeout 30s /usr/bin/python3 /usr/share/beremiz/Beremiz_cli.py --project-home beremiz-project/study-plc --keep transfer run'
+```
+
+Ключевые строки runtime:
+
+```text
+Starting local runtime...
+Beremiz_service:  1.4
+PLC data transfered successfully.
+PLC installed successfully.
+PLCobject : PLC started
+PLCobject : Python extensions started
+Starting PLC
+```
+
+`timeout` завершил процесс с кодом `124`; это ожидаемо для кратковременного smoke test с `--keep`.
+
+Фрагмент simulator log, подтверждающий обмен с платы:
+
+```text
+client connected: 10.42.0.211:40796
+read fc=3 start=0 count=3 values=[600, 0, 500]
+write fc=6 address=1 value=0
+read fc=3 start=0 count=3 values=[600, 0, 500]
+write fc=6 address=1 value=1
+read fc=3 start=0 count=3 values=[600, 1, 500]
+```
+
+Финальная проверка регистров simulator:
+
+```bash
+python3 modbus-simulator/modbus_client.py 127.0.0.1 --port 1502 read-holding 0 3
+```
+
+Результат:
+
+```text
+[600, 1, 500]
+```
+
+Проверка успеха:
+
+- PLC собран нативно на VisionFive 2 под `riscv64`.
+- Beremiz local runtime на VisionFive 2 стартовал и принял PLC через `transfer`.
+- Simulator на ПК получил Modbus TCP запросы от `10.42.0.211`.
+- PLC прочитал `sensor_value=600`, `threshold=500` и записал `output_command=1` в holding register `1`.
+
+Вывод:
+
+- Минимальный стенд теперь работает end-to-end: ПК simulator -> VisionFive 2 Beremiz runtime -> Modbus TCP -> ПК simulator.
+- Следующий этап можно посвятить нормальному запуску runtime как сервиса на плате и подключению IDE/online-monitoring с ПК.
+
+Следующий шаг:
+
+- Шаг 6: оформить постоянный/повторяемый запуск Beremiz runtime на VisionFive 2 и подключение Beremiz IDE с ПК для online monitoring.

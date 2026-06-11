@@ -60,3 +60,27 @@ Build with Modbus support:
 scripts/prepare_modbus_source.sh
 MODBUS_PATH="$PWD/.deps/Modbus" /usr/bin/python3 /usr/share/beremiz/Beremiz_cli.py --project-home beremiz-project/study-plc clean build
 ```
+
+Build on VisionFive 2:
+
+```bash
+scripts/sync_to_visionfive.sh
+scripts/build_on_visionfive.sh
+```
+
+Runtime smoke test from VisionFive 2 to the PC simulator:
+
+```bash
+python3 modbus-simulator/modbus_server.py --host 0.0.0.0 --port 1502 --verbose
+```
+
+In another terminal:
+
+```bash
+python3 modbus-simulator/modbus_client.py 127.0.0.1 --port 1502 write-single 0 600
+python3 modbus-simulator/modbus_client.py 127.0.0.1 --port 1502 write-single 1 0
+ssh root@10.42.0.211 'cd /root/beremiz-stand && MODBUS_PATH="/root/beremiz-stand/.deps/Modbus" timeout 30s /usr/bin/python3 /usr/share/beremiz/Beremiz_cli.py --project-home beremiz-project/study-plc --keep transfer run'
+python3 modbus-simulator/modbus_client.py 127.0.0.1 --port 1502 read-holding 0 3
+```
+
+Expected final register state: `[600, 1, 500]`.
