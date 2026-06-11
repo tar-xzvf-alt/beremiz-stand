@@ -594,3 +594,124 @@ python3 modbus-simulator/modbus_client.py 127.0.0.1 --port 1502 read-holding 0 3
 Следующий шаг:
 
 - Шаг 6: оформить постоянный/повторяемый запуск Beremiz runtime на VisionFive 2 и подключение Beremiz IDE с ПК для online monitoring.
+
+### Шаг 6. Persistent Runtime На VisionFive 2
+
+Дата: 2026-06-11
+
+Цель: заменить временный local runtime из smoke test на управляемый `Beremiz_service.py`, который постоянно слушает ERPC на VisionFive 2 и принимает загрузку PLC с CLI.
+
+Добавленные скрипты:
+
+- `scripts/start_runtime_on_visionfive.sh` — запускает `Beremiz_service.py` на плате в фоне.
+- `scripts/stop_runtime_on_visionfive.sh` — останавливает запущенный runtime по pidfile.
+- `scripts/deploy_run_on_visionfive_runtime.sh` — загружает `study-plc` в уже запущенный runtime и запускает PLC.
+- `scripts/check_runtime_status.py` — проверяет статус runtime по ERPC с ПК без чтения runtime-логов.
+
+Выбранные параметры runtime:
+
+| Параметр | Значение |
+| --- | --- |
+| Runtime host | `10.42.0.211` |
+| Runtime port | `3000` |
+| Runtime URI | `ERPC://10.42.0.211:3000` |
+| Runtime working dir | `/root/beremiz-runtime/study-plc` |
+| Исходники стенда на плате | `/root/beremiz-stand` |
+| Web UI / Twisted | выключены: `-t 0 -w off` |
+| wx taskbar | выключен: `-x 0` |
+
+Команда запуска runtime:
+
+```bash
+scripts/start_runtime_on_visionfive.sh
+```
+
+Результат:
+
+```text
+Beremiz runtime started on 10.42.0.211:3000
+```
+
+Проверка загрузки и запуска PLC в persistent runtime:
+
+```bash
+python3 modbus-simulator/modbus_client.py 127.0.0.1 --port 1502 write-single 0 600
+python3 modbus-simulator/modbus_client.py 127.0.0.1 --port 1502 write-single 1 0
+python3 modbus-simulator/modbus_client.py 127.0.0.1 --port 1502 read-holding 0 3
+scripts/deploy_run_on_visionfive_runtime.sh
+python3 modbus-simulator/modbus_client.py 127.0.0.1 --port 1502 read-holding 0 3
+```
+
+Ключевые строки `deploy_run_on_visionfive_runtime.sh`:
+
+```text
+ERPC connecting to URI : ERPC://10.42.0.211:3000
+Version string: Linux 6.18.18-rt-alt1.port.rv64
+PLC data transfered successfully.
+PLC installed successfully.
+Starting PLC
+```
+
+Состояние registers simulator:
+
+```text
+[600, 0, 500]
+[600, 1, 500]
+```
+
+Проверка статуса runtime с ПК:
+
+```bash
+/usr/bin/python3 scripts/check_runtime_status.py ERPC://10.42.0.211:3000
+```
+
+Результат после запуска PLC:
+
+```text
+PLC Status: Started
+Log counts: [0, 0, 0, 3]
+```
+
+Проверка остановки и повторного старта runtime:
+
+```bash
+scripts/stop_runtime_on_visionfive.sh
+scripts/start_runtime_on_visionfive.sh
+/usr/bin/python3 scripts/check_runtime_status.py ERPC://10.42.0.211:3000
+```
+
+Результат:
+
+```text
+Beremiz runtime stopped
+Beremiz runtime started on 10.42.0.211:3000
+PLC Status: Stopped
+Log counts: [0, 0, 0, 0]
+```
+
+Ограничение online monitoring с ПК:
+
+- ПК использует Beremiz `1.5-alt0.1.20260530.1.noarch`.
+- VisionFive 2 использует Beremiz_service `1.4-alt0.1.20250821.2.noarch`.
+- Команда `/usr/bin/python3 /usr/share/beremiz/Beremiz_cli.py --project-home beremiz-project/study-plc --uri ERPC://10.42.0.211:3000 connect` подключается к runtime, видит `PLC Status: Started`, но затем получает ошибку при `GetLogMessage`.
+- Ошибка выглядит как несовместимость eRPC-структуры log message между версиями `1.5` и `1.4`: `struct.error: unpack_from requires a buffer ...`.
+- Поэтому для автоматической проверки статуса используется `scripts/check_runtime_status.py`, который вызывает только `GetPLCstatus` и не читает runtime logs.
+- Полноценный IDE online monitoring с ПК нужно проверять после выравнивания версий Beremiz на ПК и плате или после отдельного workaround для чтения логов.
+
+Проверка успеха:
+
+- `Beremiz_service.py` запускается как отдельный долгоживущий процесс на VisionFive 2.
+- ERPC runtime доступен по `ERPC://10.42.0.211:3000`.
+- PLC загружается в persistent runtime через `transfer run`, без временного local runtime.
+- Simulator подтверждает реальный Modbus TCP exchange с платы: register `1` меняется на `1` при `sensor_value=600` и `threshold=500`.
+- Статус runtime проверяется с ПК отдельным скриптом и показывает `PLC Status: Started`.
+- Stop/start runtime повторяемы и оставляют сервис в понятном состоянии.
+
+Вывод:
+
+- Runtime-часть стенда стала повторяемой: исходники синхронизируются на плату, проект собирается нативно, runtime запускается отдельно, PLC загружается и запускается по ERPC.
+- Главный оставшийся риск для online monitoring — несовпадение версий Beremiz `1.5` на ПК и `1.4` на VisionFive 2.
+
+Следующий шаг:
+
+- Шаг 7: выровнять версии Beremiz для ПК и VisionFive 2 или найти безопасный способ online monitoring без ошибки `GetLogMessage`.

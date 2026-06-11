@@ -84,3 +84,19 @@ python3 modbus-simulator/modbus_client.py 127.0.0.1 --port 1502 read-holding 0 3
 ```
 
 Expected final register state: `[600, 1, 500]`.
+
+Persistent runtime on VisionFive 2:
+
+```bash
+scripts/start_runtime_on_visionfive.sh
+scripts/deploy_run_on_visionfive_runtime.sh
+/usr/bin/python3 scripts/check_runtime_status.py ERPC://10.42.0.211:3000
+```
+
+Stop persistent runtime:
+
+```bash
+scripts/stop_runtime_on_visionfive.sh
+```
+
+The runtime URI is `ERPC://10.42.0.211:3000`.

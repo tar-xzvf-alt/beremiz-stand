@@ -3,4 +3,5 @@ __pycache__/
 .venv/
 venv/
 beremiz-project/*/build/
+beremiz-project/*/psk/
 .deps/
