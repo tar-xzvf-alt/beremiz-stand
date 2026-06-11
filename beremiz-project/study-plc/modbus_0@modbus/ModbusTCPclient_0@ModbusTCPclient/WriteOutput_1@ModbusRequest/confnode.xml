@@ -1,0 +1,2 @@
+<?xml version='1.0' encoding='utf-8'?>
+<ModbusRequest xmlns:xsd="http://www.w3.org/2001/XMLSchema" Function="06 - Write Single Register" SlaveID="1" Nr_of_Channels="1" Start_Address="1" Timeout_in_ms="1000" Write_on_change="true"/>

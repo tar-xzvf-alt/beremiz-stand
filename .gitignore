@@ -3,3 +3,4 @@ __pycache__/
 .venv/
 venv/
 beremiz-project/*/build/
+.deps/

@@ -1,0 +1,2 @@
+<?xml version='1.0' encoding='utf-8'?>
+<ModbusRequest xmlns:xsd="http://www.w3.org/2001/XMLSchema" Function="03 - Read Holding Registers" SlaveID="1" Nr_of_Channels="3" Start_Address="0" Timeout_in_ms="1000"/>

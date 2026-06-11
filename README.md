@@ -313,3 +313,112 @@ beremiz beremiz-project/study-plc
 Следующий шаг:
 
 - Шаг 4: добавить минимальную PLC-логику и подготовить проект к обмену с Modbus TCP simulator.
+
+### Шаг 4. PLC-Логика И Modbus TCP Client
+
+Дата: 2026-06-11
+
+Цель: добавить минимальную PLC-логику в `study-plc`, настроить Modbus TCP client к simulator и проверить сборку проекта.
+
+Изученные источники:
+
+- `/usr/share/beremiz/projects/modbus_test_tcp/` — штатный пример Beremiz с Modbus TCP client/server.
+- `/usr/share/beremiz/modbus/modbus_base.py` — схема параметров Modbus request и правила формирования IEC locations.
+- `/usr/share/beremiz/util/paths.py` — подтверждено, что путь к сторонней Modbus-библиотеке можно задавать через `MODBUS_PATH`.
+
+Созданные/измененные артефакты:
+
+- `scripts/configure_study_plc.py` — воспроизводимо генерирует PLC-логику и Modbus confnode-файлы проекта.
+- `scripts/prepare_modbus_source.sh` — готовит локальную сборку Modbus C-библиотеки из установленного source-пакета.
+- `beremiz-project/study-plc/plc.xml` — теперь содержит программу `plc_prg` на ST.
+- `beremiz-project/study-plc/modbus_0@modbus/` — конфигурация Modbus TCP client и двух Modbus requests.
+- `beremiz-project/README.md` — добавлены карта регистров и команды сборки.
+
+Modbus TCP client:
+
+| Параметр | Значение |
+| --- | --- |
+| Remote IP | `10.42.0.1` |
+| Remote port | `1502` |
+| Invocation rate | `100 ms` |
+| Request delay | `0 ms` |
+
+Modbus requests:
+
+| Request | Function | Start address | Count | Назначение |
+| --- | --- | --- | --- | --- |
+| `ReadHolding_0` | `03 - Read Holding Registers` | `0` | `3` | прочитать `sensor_value`, `output_command`, `threshold` из simulator |
+| `WriteOutput_1` | `06 - Write Single Register` | `1` | `1` | записать PLC-команду в holding register `1` simulator |
+
+PLC-логика:
+
+```iecst
+ReadRequestExecute := TRUE;
+WriteRequestExecute := TRUE;
+
+sensor_value := WORD_TO_UINT(SensorRegister);
+threshold := WORD_TO_UINT(ThresholdRegister);
+remote_output_echo := WORD_TO_UINT(RemoteOutputRegister);
+
+alarm := sensor_value > threshold;
+
+IF alarm THEN
+    output_command := UINT#1;
+ELSE
+    output_command := UINT#0;
+END_IF;
+
+OutputCommandRegister := UINT_TO_WORD(output_command);
+```
+
+Карта регистров:
+
+| Simulator holding register | PLC variable | IEC location | Direction |
+| --- | --- | --- | --- |
+| `0` | `SensorRegister` / `sensor_value` | `%IW0.0.0.0` | read |
+| `1` | `RemoteOutputRegister` / `remote_output_echo` | `%IW0.0.0.1` | read |
+| `2` | `ThresholdRegister` / `threshold` | `%IW0.0.0.2` | read |
+| `1` | `OutputCommandRegister` / `output_command` | `%QW0.0.1.1` | write |
+
+Modbus C-зависимость:
+
+- Нужный ALT-пакет: `beremiz-modbus-source-20170318-alt1.noarch`.
+- Пакет кладет исходники в `/usr/src/beremiz-modbus`.
+- Beremiz по умолчанию ищет `Modbus` рядом с `/usr/share/beremiz`, поэтому для сборки используем `MODBUS_PATH`.
+- Старые исходники используют `<termio.h>`; `scripts/prepare_modbus_source.sh` копирует исходники в `.deps/Modbus`, заменяет include на `<termios.h>` только в локальной копии и собирает `libmb.a`/`libmb.so`.
+
+Команды проверки:
+
+```bash
+/usr/bin/python3 scripts/configure_study_plc.py beremiz-project/study-plc
+scripts/prepare_modbus_source.sh
+MODBUS_PATH="$PWD/.deps/Modbus" /usr/bin/python3 /usr/share/beremiz/Beremiz_cli.py --project-home beremiz-project/study-plc clean build
+```
+
+Результат сборки:
+
+```text
+Successfully built.
+PLC Status: Disconnected
+```
+
+Наблюдение:
+
+- При сборке остаются предупреждения GCC в сгенерированном `MB_0.c` про `server_nodes` размера 0.
+- Проект использует только Modbus client без server nodes; предупреждения не остановили сборку и линковку.
+
+Проверка успеха:
+
+- Beremiz CLI загружает проект без XML schema warning.
+- IEC/ST код успешно преобразуется в C.
+- `LOCATED_VARIABLES.h` содержит ожидаемые Modbus locations.
+- Сборка с `MODBUS_PATH=$PWD/.deps/Modbus` завершается `Successfully built`.
+
+Вывод:
+
+- `study-plc` готов как минимальный Beremiz-проект с Modbus TCP client-конфигурацией.
+- Следующий этап должен проверить не только сборку, но и реальный запуск runtime/PLC с подключением к simulator.
+
+Следующий шаг:
+
+- Шаг 5: подготовить target/runtime-сценарий для запуска PLC на VisionFive 2 и проверить доступность Modbus simulator с этого runtime.
