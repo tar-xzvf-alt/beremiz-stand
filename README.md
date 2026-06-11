@@ -136,3 +136,87 @@ Starfive VisionFive 2:
 Следующий шаг:
 
 - Шаг 2: создать и запустить Modbus TCP simulator на ПК, затем проверить чтение/запись регистров и видимость обмена с VisionFive 2.
+
+### Шаг 2. Modbus TCP Simulator На ПК
+
+Дата: 2026-06-11
+
+Цель: получить первое внешнее устройство для PLC-стенда без дополнительного железа.
+
+Реализация:
+
+- Создан `modbus-simulator/modbus_server.py`.
+- Создан `modbus-simulator/modbus_client.py` для проверок.
+- Реализация использует только стандартную библиотеку Python 3; внешний пакет `pymodbus` для этого шага не потребовался.
+- Simulator слушает Modbus TCP на `0.0.0.0:1502`.
+- Порт `1502` выбран вместо стандартного `502`, чтобы запускать simulator без root-прав.
+
+Карта holding registers:
+
+| Register | Назначение | Начальное значение |
+| --- | --- | --- |
+| `0` | `sensor_value`, имитация значения датчика | `123` |
+| `1` | `output_command`, команда от PLC | `0` |
+| `2` | `threshold`, порог для PLC-логики | `500` |
+
+Поддержанные Modbus-функции:
+
+- `3`: read holding registers.
+- `4`: read input registers.
+- `6`: write single holding register.
+- `16`: write multiple holding registers.
+
+Команда запуска:
+
+```bash
+python3 modbus-simulator/modbus_server.py --host 0.0.0.0 --port 1502 --verbose
+```
+
+Локальная проверка на ПК:
+
+```bash
+python3 modbus-simulator/modbus_client.py 127.0.0.1 --port 1502 read-holding 0 3
+python3 modbus-simulator/modbus_client.py 127.0.0.1 --port 1502 write-single 1 77
+python3 modbus-simulator/modbus_client.py 127.0.0.1 --port 1502 read-holding 0 3
+```
+
+Результат:
+
+```text
+[123, 0, 500]
+ok
+[123, 77, 500]
+```
+
+Проверка с VisionFive 2:
+
+```bash
+scp -q modbus-simulator/modbus_client.py root@10.42.0.211:/tmp/beremiz_modbus_client.py
+ssh root@10.42.0.211 python3 /tmp/beremiz_modbus_client.py 10.42.0.1 --port 1502 read-holding 0 3
+ssh root@10.42.0.211 python3 /tmp/beremiz_modbus_client.py 10.42.0.1 --port 1502 write-single 1 88
+ssh root@10.42.0.211 python3 /tmp/beremiz_modbus_client.py 10.42.0.1 --port 1502 read-holding 0 3
+ssh root@10.42.0.211 rm -f /tmp/beremiz_modbus_client.py
+```
+
+Результат:
+
+```text
+[123, 77, 500]
+ok
+[123, 88, 500]
+```
+
+Проверка успеха:
+
+- Simulator запускается на ПК на порту `1502`.
+- Локальный клиент читает и пишет holding registers.
+- VisionFive 2 подключается к simulator по адресу `10.42.0.1:1502` и успешно читает/пишет регистры.
+
+Вывод:
+
+- Первый внешний Modbus TCP модуль для стенда готов.
+- Для следующего шага можно использовать simulator как устройство, к которому PLC-программа на VisionFive 2 будет обращаться по сети.
+
+Следующий шаг:
+
+- Шаг 3: установить/запустить Beremiz IDE на ПК и создать пустой проект для дальнейшей настройки Modbus TCP обмена.
