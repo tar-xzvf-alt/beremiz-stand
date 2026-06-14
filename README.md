@@ -715,3 +715,89 @@ Log counts: [0, 0, 0, 0]
 Следующий шаг:
 
 - Шаг 7: выровнять версии Beremiz для ПК и VisionFive 2 или найти безопасный способ online monitoring без ошибки `GetLogMessage`.
+
+### Шаг 7. Совместимость Online Monitoring Между Beremiz 1.5 И Runtime 1.4
+
+Дата: 2026-06-14
+
+Цель: устранить ошибку `GetLogMessage`, из-за которой Beremiz CLI/IDE `1.5` на ПК не мог стабильно мониторить `Beremiz_service.py` `1.4` на VisionFive 2.
+
+Диагностика:
+
+- `runtime/eRPCServer.py` на ПК и плате совпадает по `sha256`.
+- `connectors/ERPC/__init__.py` на ПК и плате совпадает по `sha256`.
+- Сгенерированные stubs `erpc_interface/erpc_PLCObject/{common,client,server}.py` отличаются.
+- Конкретное отличие, ломавшее чтение логов: в Beremiz `1.4` поле `log_message.sec` сериализуется как `uint32`, а в Beremiz `1.5` клиент ожидает `uint64`.
+- Второе отличие runtime `1.4`: `PLCObject.GetLogMessage()` может вернуть `None` для пустого сообщения, а общий `eRPCServer.py` ожидает tuple для `log_message(*res)`.
+
+Решение:
+
+- Добавлен runtime extension `scripts/beremiz_runtime_compat_15.py`.
+- Extension загружается штатным параметром `Beremiz_service.py -e ...`; системные файлы `/usr/share/beremiz` не изменяются.
+- Extension меняет только runtime-поведение для ERPC log messages:
+- `common.log_message._write` на плате пишет `sec` как `uint64`, как ожидает Beremiz `1.5` на ПК.
+- `PLCObject.GetLogMessage` на плате возвращает пустой tuple `("", 0, 0, 0)` вместо `None`, чтобы ERPC server не падал на пустом сообщении.
+- `scripts/start_runtime_on_visionfive.sh` автоматически подключает extension, если он есть в `/root/beremiz-stand/scripts/beremiz_runtime_compat_15.py`.
+
+Также изменено:
+
+- `scripts/sync_to_visionfive.sh` теперь исключает `beremiz-project/*/psk`, чтобы не переносить локальные Beremiz PSK/management-файлы на плату.
+
+Команды проверки:
+
+```bash
+scripts/sync_to_visionfive.sh
+scripts/stop_runtime_on_visionfive.sh
+scripts/start_runtime_on_visionfive.sh
+scripts/build_on_visionfive.sh
+scripts/deploy_run_on_visionfive_runtime.sh
+timeout 8s /usr/bin/python3 /usr/share/beremiz/Beremiz_cli.py --project-home beremiz-project/study-plc --uri ERPC://10.42.0.211:3000 --keep connect
+```
+
+Ключевой результат обычного Beremiz CLI `1.5` с ПК:
+
+```text
+ERPC connecting to URI : ERPC://10.42.0.211:3000
+Version string: Linux 6.18.18-rt-alt1.port.rv64
+DEBUG at 2026-02-27 12:01:58.996522+00:00: PLC started
+DEBUG at 2026-02-27 12:01:58.997037+00:00: Python extensions started
+PLC Status: Started
+Debugger ready
+Press Ctrl+C to quit
+PLC Status: Started
+```
+
+Важно:
+
+- Команда выше завершается через `timeout`; код `124` для такой проверки ожидаем и был обработан как успех.
+- Строки `Stats[1970-01-01 00:00:00+00:00]` остаются, но не мешают подключению и monitoring loop.
+- `Latest build does not match with connected target` при `connect` с ПК ожидаем, потому что проект на ПК не является riscv64-сборкой; deploy/run выполняется с нативной сборки на VisionFive 2.
+
+Проверка Modbus после исправления monitoring:
+
+```bash
+python3 modbus-simulator/modbus_client.py 127.0.0.1 --port 1502 read-holding 0 3
+```
+
+Результат:
+
+```text
+[600, 1, 500]
+```
+
+Проверка успеха:
+
+- Обычный Beremiz CLI `1.5` на ПК подключается к `Beremiz_service.py` `1.4` на VisionFive 2 без traceback `GetLogMessage`.
+- `--keep connect` держит monitoring loop и повторно видит `PLC Status: Started`.
+- Runtime logs читаются с ПК.
+- PLC продолжает работать и писать `output_command=1` в Modbus simulator.
+- Исправление не требует переустановки Beremiz на ПК или VisionFive 2.
+
+Вывод:
+
+- Online monitoring через ERPC стал практически пригоден для текущего смешанного набора версий: ПК Beremiz `1.5`, VisionFive 2 runtime `1.4`.
+- Для IDE нужно запускать штатный `beremiz beremiz-project/study-plc`, указать URI `ERPC://10.42.0.211:3000` и подключаться к runtime; compatibility находится на стороне runtime.
+
+Следующий шаг:
+
+- Шаг 8: проверить Beremiz IDE online view вручную в GUI и зафиксировать, какие переменные удобно наблюдать/форсировать в `study-plc`.

@@ -5,8 +5,10 @@ TARGET=${1:-root@10.42.0.211}
 RUNTIME_DIR=${2:-/root/beremiz-runtime/study-plc}
 BIND_IP=${3:-10.42.0.211}
 PORT=${4:-3000}
+REMOTE_DIR=${5:-/root/beremiz-stand}
 PIDFILE="$RUNTIME_DIR/beremiz_service.pid"
 LOGFILE="$RUNTIME_DIR/beremiz_service.log"
+COMPAT_EXTENSION="$REMOTE_DIR/scripts/beremiz_runtime_compat_15.py"
 
 ssh "$TARGET" \
 	"set -eu; \
@@ -17,7 +19,11 @@ ssh "$TARGET" \
 	fi; \
 	rm -f '$PIDFILE'; \
 	cd '$RUNTIME_DIR'; \
-	nohup /usr/bin/python3 /usr/share/beremiz/Beremiz_service.py -i '$BIND_IP' -p '$PORT' -x 0 -t 0 -w off . >'$LOGFILE' 2>&1 & \
+	EXT_ARGS=; \
+	if [ -f '$COMPAT_EXTENSION' ]; then \
+		EXT_ARGS=\"-e $COMPAT_EXTENSION\"; \
+	fi; \
+	nohup /usr/bin/python3 /usr/share/beremiz/Beremiz_service.py -i '$BIND_IP' -p '$PORT' -x 0 -t 0 -w off \$EXT_ARGS . >'$LOGFILE' 2>&1 & \
 	echo \$! > '$PIDFILE'; \
 	sleep 2; \
 	if ! kill -0 \"\$(cat '$PIDFILE')\" 2>/dev/null; then \

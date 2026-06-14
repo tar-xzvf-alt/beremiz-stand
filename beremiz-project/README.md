@@ -93,6 +93,12 @@ scripts/deploy_run_on_visionfive_runtime.sh
 /usr/bin/python3 scripts/check_runtime_status.py ERPC://10.42.0.211:3000
 ```
 
+Online monitoring check from the PC with the stock Beremiz CLI:
+
+```bash
+/usr/bin/python3 /usr/share/beremiz/Beremiz_cli.py --project-home beremiz-project/study-plc --uri ERPC://10.42.0.211:3000 --keep connect
+```
+
 Stop persistent runtime:
 
 ```bash
@@ -100,3 +106,5 @@ scripts/stop_runtime_on_visionfive.sh
 ```
 
 The runtime URI is `ERPC://10.42.0.211:3000`.
+
+`scripts/start_runtime_on_visionfive.sh` loads `scripts/beremiz_runtime_compat_15.py` on VisionFive 2 when the file is present. This keeps the Beremiz 1.4 runtime eRPC log messages compatible with the Beremiz 1.5 CLI/IDE on the PC.

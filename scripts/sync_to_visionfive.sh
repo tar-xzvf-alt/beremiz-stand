@@ -11,6 +11,8 @@ tar \
 	--exclude='./.git' \
 	--exclude='./.deps' \
 	--exclude='./beremiz-project/*/build' \
+	--exclude='./beremiz-project/*/psk' \
+	--exclude='./beremiz-project/*/psk/*' \
 	--exclude='__pycache__' \
 	-czf "$ARCHIVE" .
 
