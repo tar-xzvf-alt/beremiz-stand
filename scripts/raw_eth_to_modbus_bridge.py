@@ -54,7 +54,8 @@ def run_bridge(args):
 		)
 		sys.stdout.flush()
 
-		while args.count == 0 or args.count > 0:
+		processed = 0
+		while args.count == 0 or processed < args.count:
 			frame = sock.recv(2048)
 			if len(frame) < 14:
 				continue
@@ -84,8 +85,7 @@ def run_bridge(args):
 			)
 			sys.stdout.flush()
 
-			if args.count > 0:
-				args.count -= 1
+			processed += 1
 
 
 def parse_args():
