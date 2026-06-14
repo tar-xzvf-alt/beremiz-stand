@@ -127,3 +127,13 @@ Useful variables for IDE online monitoring:
 | `SensorRegister` | `16#0258` |
 | `ThresholdRegister` | `16#01F4` |
 | `OutputCommandRegister` | `16#0001` |
+
+Alarm toggle demo:
+
+```bash
+scripts/start_runtime_on_visionfive.sh
+scripts/deploy_run_on_visionfive_runtime.sh
+/usr/bin/python3 scripts/demo_alarm_toggle.py
+```
+
+The demo forces Modbus register `1` to the wrong value before each case, then waits until the PLC overwrites it with the expected `output_command`.

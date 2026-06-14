@@ -913,3 +913,115 @@ python3 modbus-simulator/modbus_client.py 127.0.0.1 --port 1502 read-holding 0 3
 Следующий шаг:
 
 - Шаг 9: добавить простую процедуру демонстрации — менять `sensor_value` в simulator ниже/выше `threshold` и наблюдать переключение `alarm`/`output_command` в IDE и Modbus register `1`.
+
+### Шаг 9. Демонстрация Переключения Alarm
+
+Дата: 2026-06-14
+
+Цель: получить короткий повторяемый сценарий, который показывает работу PLC-логики: при `sensor_value <= threshold` команда выключена, при `sensor_value > threshold` команда включена.
+
+Добавлен скрипт:
+
+- `scripts/demo_alarm_toggle.py`
+
+Что делает скрипт:
+
+- Подключается к Modbus simulator на `127.0.0.1:1502`.
+- Ставит `threshold=500` в holding register `2`.
+- Перед каждым кейсом намеренно записывает register `1` в неправильное значение.
+- Меняет `sensor_value` в holding register `0`.
+- Ждет, пока PLC на VisionFive 2 прочитает registers и перезапишет holding register `1` правильным `output_command`.
+
+Команды проверки:
+
+```bash
+scripts/start_runtime_on_visionfive.sh
+scripts/deploy_run_on_visionfive_runtime.sh
+/usr/bin/python3 scripts/demo_alarm_toggle.py
+```
+
+Результат:
+
+```text
+LOW: sensor=400, threshold=500, forced_output=1, initial=[400, 1, 500], final=[400, 0, 500]
+HIGH: sensor=600, threshold=500, forced_output=0, initial=[600, 0, 500], final=[600, 1, 500]
+LOW-AGAIN: sensor=250, threshold=500, forced_output=1, initial=[250, 1, 500], final=[250, 0, 500]
+demo passed
+```
+
+Проверка runtime после demo:
+
+```bash
+/usr/bin/python3 scripts/check_runtime_status.py ERPC://10.42.0.211:3000
+```
+
+Результат:
+
+```text
+PLC Status: Started
+Log counts: [0, 0, 0, 3]
+```
+
+Финальное состояние Modbus registers:
+
+```bash
+python3 modbus-simulator/modbus_client.py 127.0.0.1 --port 1502 read-holding 0 3
+```
+
+Результат:
+
+```text
+[250, 0, 500]
+```
+
+Проверка online monitoring после demo:
+
+```bash
+timeout 5s /usr/bin/python3 /usr/share/beremiz/Beremiz_cli.py --project-home beremiz-project/study-plc --keep connect
+```
+
+Ключевой результат:
+
+```text
+ERPC connecting to URI : ERPC://10.42.0.211:3000
+PLC Status: Started
+Debugger ready
+Press Ctrl+C to quit
+PLC Status: Started
+```
+
+Как наблюдать это в IDE:
+
+```bash
+beremiz beremiz-project/study-plc
+```
+
+В проекте уже сохранен URI `ERPC://10.42.0.211:3000`, поэтому IDE должна подключаться к runtime на VisionFive 2, а не запускать локальный runtime.
+
+Переменные для наблюдения:
+
+| Variable | LOW после demo | HIGH во время demo | LOW-AGAIN после demo |
+| --- | --- | --- | --- |
+| `sensor_value` | `400` | `600` | `250` |
+| `threshold` | `500` | `500` | `500` |
+| `remote_output_echo` | `0` | `1` | `0` |
+| `alarm` | `FALSE` | `TRUE` | `FALSE` |
+| `output_command` | `0` | `1` | `0` |
+| `SensorRegister` | `16#0190` | `16#0258` | `16#00FA` |
+| `ThresholdRegister` | `16#01F4` | `16#01F4` | `16#01F4` |
+| `OutputCommandRegister` | `16#0000` | `16#0001` | `16#0000` |
+
+Проверка успеха:
+
+- PLC на VisionFive 2 реагирует на изменение Modbus register `0`.
+- Register `1` меняется не самим demo-скриптом в правильную сторону, а PLC-программой после чтения `sensor_value` и `threshold`.
+- Runtime остается `Started` после demo.
+- Online monitoring через CLI остается рабочим.
+
+Вывод:
+
+- Теперь стенд имеет понятный демонстрационный сценарий: можно запускать demo и одновременно смотреть в IDE, как меняются `sensor_value`, `alarm` и `output_command`.
+
+Следующий шаг:
+
+- Шаг 10: добавить tcpdump/Wireshark capture этого сценария, чтобы связать переменные PLC с реальными Modbus TCP пакетами.
