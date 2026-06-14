@@ -1,0 +1,243 @@
+# Пошаговое Руководство
+
+Это практическая инструкция по запуску учебного стенда Beremiz: ПК разработчика, VisionFive 2 как Linux PLC-контроллер и Modbus TCP simulator на ПК.
+
+## 1. Проверить Схему Стенда
+
+Адреса, используемые в проекте:
+
+| Узел | Адрес |
+| --- | --- |
+| ПК разработчика | `10.42.0.1` |
+| VisionFive 2 | `10.42.0.211` |
+| Beremiz runtime на VisionFive 2 | `ERPC://10.42.0.211:3000` |
+| Modbus simulator на ПК | `10.42.0.1:1502` |
+
+Проверка связи с платой:
+
+```bash
+ping -c 3 10.42.0.211
+ssh root@10.42.0.211 true
+```
+
+## 2. Запустить Modbus TCP Simulator
+
+Из корня репозитория:
+
+```bash
+python3 modbus-simulator/modbus_server.py --host 0.0.0.0 --port 1502 --verbose
+```
+
+В другом терминале проверьте registers:
+
+```bash
+python3 modbus-simulator/modbus_client.py 127.0.0.1 --port 1502 read-holding 0 3
+```
+
+Карта registers:
+
+| Register | Назначение |
+| --- | --- |
+| `0` | `sensor_value` |
+| `1` | `output_command` |
+| `2` | `threshold` |
+
+## 3. Синхронизировать Проект На VisionFive 2
+
+VisionFive 2 не использует `git pull`: файлы передаются с ПК напрямую через `scp`.
+
+```bash
+scripts/sync_to_visionfive.sh
+```
+
+Скрипт распаковывает рабочую копию в `/root/beremiz-stand` на плате и не переносит `.git`, `.deps`, `build/`, `psk/` и Python cache.
+
+## 4. Собрать PLC На VisionFive 2
+
+Сборка выполняется нативно на `riscv64`, чтобы получить правильный `study-plc.so`.
+
+```bash
+scripts/build_on_visionfive.sh
+```
+
+Ожидаемый финал:
+
+```text
+Successfully built.
+```
+
+## 5. Запустить Persistent Runtime
+
+```bash
+scripts/start_runtime_on_visionfive.sh
+```
+
+Ожидаемый вывод:
+
+```text
+Beremiz runtime started on 10.42.0.211:3000
+```
+
+Остановить runtime:
+
+```bash
+scripts/stop_runtime_on_visionfive.sh
+```
+
+Проверить статус runtime:
+
+```bash
+/usr/bin/python3 scripts/check_runtime_status.py ERPC://10.42.0.211:3000
+```
+
+## 6. Загрузить И Запустить PLC
+
+```bash
+scripts/deploy_run_on_visionfive_runtime.sh
+```
+
+Ожидаемые строки:
+
+```text
+ERPC connecting to URI : ERPC://10.42.0.211:3000
+PLC data transfered successfully.
+PLC installed successfully.
+Starting PLC
+```
+
+## 7. Проверить Логику Alarm
+
+Запустите демонстрационный сценарий:
+
+```bash
+/usr/bin/python3 scripts/demo_alarm_toggle.py
+```
+
+Ожидаемый результат:
+
+```text
+LOW: sensor=400, threshold=500, forced_output=1, initial=[400, 1, 500], final=[400, 0, 500]
+HIGH: sensor=600, threshold=500, forced_output=0, initial=[600, 0, 500], final=[600, 1, 500]
+LOW-AGAIN: sensor=250, threshold=500, forced_output=1, initial=[250, 1, 500], final=[250, 0, 500]
+demo passed
+```
+
+Смысл проверки: demo специально записывает register `1` в неправильное значение, а PLC должен исправить его в следующем цикле.
+
+## 8. Открыть Beremiz GUI
+
+На ПК:
+
+```bash
+beremiz beremiz-project/study-plc
+```
+
+В проекте уже сохранен runtime URI:
+
+```text
+ERPC://10.42.0.211:3000
+```
+
+Если IDE не подключилась автоматически, подключитесь к PLC runtime с этим URI. Runtime должен быть уже запущен на VisionFive 2.
+
+## 9. Что Смотреть В Online View
+
+Откройте `plc_prg` и наблюдайте переменные:
+
+| Variable | LOW | HIGH | LOW-AGAIN |
+| --- | --- | --- | --- |
+| `sensor_value` | `400` | `600` | `250` |
+| `threshold` | `500` | `500` | `500` |
+| `remote_output_echo` | `0` | `1` | `0` |
+| `alarm` | `FALSE` | `TRUE` | `FALSE` |
+| `output_command` | `0` | `1` | `0` |
+| `SensorRegister` | `16#0190` | `16#0258` | `16#00FA` |
+| `ThresholdRegister` | `16#01F4` | `16#01F4` | `16#01F4` |
+| `OutputCommandRegister` | `16#0000` | `16#0001` | `16#0000` |
+
+Удобный порядок ручной проверки:
+
+1. Запустить simulator.
+2. Запустить runtime на VisionFive 2.
+3. Выполнить `scripts/deploy_run_on_visionfive_runtime.sh`.
+4. Открыть `beremiz beremiz-project/study-plc`.
+5. Подключиться к runtime `ERPC://10.42.0.211:3000`.
+6. Открыть `plc_prg` в online view.
+7. В другом терминале запускать `/usr/bin/python3 scripts/demo_alarm_toggle.py`.
+8. Наблюдать, как `alarm` и `output_command` меняются при переходе `sensor_value` ниже/выше `threshold`.
+
+## 10. Проверить Online Monitoring Из CLI
+
+Если GUI нужно исключить из диагностики, проверьте тот же ERPC monitoring через CLI:
+
+```bash
+timeout 5s /usr/bin/python3 /usr/share/beremiz/Beremiz_cli.py --project-home beremiz-project/study-plc --keep connect
+```
+
+Ожидаемые признаки успеха:
+
+```text
+ERPC connecting to URI : ERPC://10.42.0.211:3000
+PLC Status: Started
+Debugger ready
+Press Ctrl+C to quit
+PLC Status: Started
+```
+
+Код `124` от `timeout` в этой проверке нормален: команда удерживает monitoring loop, а `timeout` просто завершает его через заданное время.
+
+## 11. Как Работает PLC-Логика
+
+PLC-программа в `plc_prg` циклически читает Modbus registers:
+
+```iecst
+sensor_value := WORD_TO_UINT(SensorRegister);
+threshold := WORD_TO_UINT(ThresholdRegister);
+remote_output_echo := WORD_TO_UINT(RemoteOutputRegister);
+
+alarm := sensor_value > threshold;
+
+IF alarm THEN
+    output_command := UINT#1;
+ELSE
+    output_command := UINT#0;
+END_IF;
+
+OutputCommandRegister := UINT_TO_WORD(output_command);
+```
+
+Beremiz Modbus client читает holding registers `0..2` из simulator и пишет `output_command` обратно в holding register `1`.
+
+## 12. Частые Проблемы
+
+### Simulator Не Отвечает
+
+Проверьте:
+
+```bash
+python3 modbus-simulator/modbus_client.py 127.0.0.1 --port 1502 read-holding 0 3
+```
+
+Если соединение отклонено, запустите simulator.
+
+### Runtime Не Отвечает
+
+Перезапустите runtime:
+
+```bash
+scripts/stop_runtime_on_visionfive.sh
+scripts/start_runtime_on_visionfive.sh
+```
+
+### После Sync Пропала Сборка На Плате
+
+Это ожидаемо: `sync_to_visionfive.sh` исключает `build/`. Повторите:
+
+```bash
+scripts/build_on_visionfive.sh
+scripts/deploy_run_on_visionfive_runtime.sh
+```
+
+### CLI/IDE Падает На `GetLogMessage`
+
+Runtime должен стартовать через `scripts/start_runtime_on_visionfive.sh`, потому что этот скрипт подключает `scripts/beremiz_runtime_compat_15.py`. Extension делает runtime Beremiz `1.4` совместимым с клиентом Beremiz `1.5` на ПК.
