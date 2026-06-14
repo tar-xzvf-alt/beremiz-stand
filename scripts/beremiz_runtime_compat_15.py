@@ -1,5 +1,13 @@
 from runtime.PLCObject import PLCObject
 from erpc_interface.erpc_PLCObject import common
+from inspect import getmembers, isfunction
+
+import erpc
+from erpc_interface.erpc_PLCObject.interface import IBeremizPLCObjectService
+from erpc_interface.erpc_PLCObject.server import BeremizPLCObjectServiceService
+from runtime import GetPLCObjectSingleton as PLC
+from runtime.loglevels import LogLevelsDict
+import runtime.eRPCServer as erpc_server_module
 
 
 # Beremiz 1.5 clients expect log_message.sec as uint64, while the 1.4
@@ -33,3 +41,41 @@ def get_log_message_15(self, level, msgid):
 
 
 PLCObject.GetLogMessage = get_log_message_15
+
+
+# Beremiz 1.4 only catches erpc.transport.ConnectionClosed here. Killing a
+# CLI/IDE client with timeout can raise ConnectionResetError and stop the RPC
+# thread while leaving the service process alive but unresponsive.
+def loop_with_connection_reset(self, when_ready):
+	if self._to_be_published():
+		self.Publish()
+
+	handler = type(
+		"PLCObjectServiceHandlder",
+		(IBeremizPLCObjectService,),
+		{
+			name: erpc_server_module.rpc_wrapper(name, self)
+			for name, _func in getmembers(IBeremizPLCObjectService, isfunction)
+		},
+	)()
+	service = BeremizPLCObjectServiceService(handler)
+
+	self.transport = erpc.transport.TCPTransport(self.ip_addr, self.port, True)
+	self.server = erpc.simple_server.SimpleServer(
+		self.transport, erpc.basic_codec.BasicCodec
+	)
+	self.server.add_service(service)
+
+	when_ready()
+
+	while self.continueloop:
+		try:
+			self.server.run()
+		except (erpc.transport.ConnectionClosed, ConnectionResetError):
+			PLC().LogMessage(LogLevelsDict["DEBUG"], "eRPC client disconnected")
+		except Exception as exc:
+			self.Unpublish()
+			raise exc
+
+
+erpc_server_module.eRPCServer.Loop = loop_with_connection_reset

@@ -105,7 +105,7 @@ OutputCommandRegister := UINT_TO_WORD(output_command);]]></xhtml:p>
 
 
 BEREMIZ_XML = """<?xml version='1.0' encoding='utf-8'?>
-<BeremizRoot xmlns:xsd="http://www.w3.org/2001/XMLSchema" URI_location="LOCAL://">
+<BeremizRoot xmlns:xsd="http://www.w3.org/2001/XMLSchema" URI_location="ERPC://10.42.0.211:3000">
   <TargetType>
     <Linux/>
   </TargetType>

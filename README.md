@@ -737,6 +737,7 @@ Log counts: [0, 0, 0, 0]
 - Extension меняет только runtime-поведение для ERPC log messages:
 - `common.log_message._write` на плате пишет `sec` как `uint64`, как ожидает Beremiz `1.5` на ПК.
 - `PLCObject.GetLogMessage` на плате возвращает пустой tuple `("", 0, 0, 0)` вместо `None`, чтобы ERPC server не падал на пустом сообщении.
+- `eRPCServer.Loop` на плате обрабатывает `ConnectionResetError` как обычное отключение клиента, чтобы `timeout`/закрытие CLI или IDE не оставляли сервис живым, но без работающего RPC thread.
 - `scripts/start_runtime_on_visionfive.sh` автоматически подключает extension, если он есть в `/root/beremiz-stand/scripts/beremiz_runtime_compat_15.py`.
 
 Также изменено:
@@ -790,6 +791,7 @@ python3 modbus-simulator/modbus_client.py 127.0.0.1 --port 1502 read-holding 0 3
 - Обычный Beremiz CLI `1.5` на ПК подключается к `Beremiz_service.py` `1.4` на VisionFive 2 без traceback `GetLogMessage`.
 - `--keep connect` держит monitoring loop и повторно видит `PLC Status: Started`.
 - Runtime logs читаются с ПК.
+- Runtime остается доступен после принудительного завершения monitoring-клиента через `timeout`.
 - PLC продолжает работать и писать `output_command=1` в Modbus simulator.
 - Исправление не требует переустановки Beremiz на ПК или VisionFive 2.
 
@@ -801,3 +803,113 @@ python3 modbus-simulator/modbus_client.py 127.0.0.1 --port 1502 read-holding 0 3
 Следующий шаг:
 
 - Шаг 8: проверить Beremiz IDE online view вручную в GUI и зафиксировать, какие переменные удобно наблюдать/форсировать в `study-plc`.
+
+### Шаг 8. Подготовка Beremiz IDE К Online View
+
+Дата: 2026-06-14
+
+Цель: сделать запуск IDE для `study-plc` удобным: проект должен открываться с уже заданным remote runtime URI, а не с `LOCAL://`.
+
+Изменения:
+
+- В `beremiz-project/study-plc/beremiz.xml` URI изменен с `LOCAL://` на `ERPC://10.42.0.211:3000`.
+- В `scripts/configure_study_plc.py` внесено то же значение, чтобы повторная генерация проекта не возвращала `LOCAL://`.
+- В `beremiz-project/README.md` добавлены команда запуска IDE и список переменных для online monitoring.
+
+Проверка GUI-среды на ПК:
+
+```bash
+/usr/bin/python3 - <<'PY'
+import wx
+app = wx.App(False)
+print('wx-ok')
+PY
+```
+
+Результат:
+
+```text
+wx-ok
+```
+
+Проверка, что CLI берет URI из `beremiz.xml` без явного `--uri`:
+
+```bash
+timeout 8s /usr/bin/python3 /usr/share/beremiz/Beremiz_cli.py --project-home beremiz-project/study-plc --keep connect
+```
+
+Ключевой результат:
+
+```text
+ERPC connecting to URI : ERPC://10.42.0.211:3000
+Version string: Linux 6.18.18-rt-alt1.port.rv64
+PLC Status: Started
+Debugger ready
+Press Ctrl+C to quit
+PLC Status: Started
+```
+
+Проверка запуска IDE:
+
+```bash
+timeout 12s beremiz beremiz-project/study-plc
+```
+
+Результат:
+
+```text
+beremiz-gui-started-timeout
+```
+
+Наблюдение:
+
+- GUI стартует в текущей графической сессии (`DISPLAY=:0`, `WAYLAND_DISPLAY=wayland-0`).
+- Traceback `RuntimeError: wrapped C/C++ object of type Menu has been deleted` появился только при принудительном завершении через `timeout`, то есть при автоматическом закрытии окна, а не при обычном запуске.
+- Автоматически проверить клики в IDE из CLI нельзя; фактическая ERPC monitoring-сессия проверена через Beremiz CLI с тем же URI из проекта.
+
+Команда ручной проверки IDE:
+
+```bash
+beremiz beremiz-project/study-plc
+```
+
+Что проверять в IDE online view:
+
+| Variable | Ожидаемое значение при registers `[600, 1, 500]` |
+| --- | --- |
+| `sensor_value` | `600` |
+| `threshold` | `500` |
+| `remote_output_echo` | `1` |
+| `alarm` | `TRUE` |
+| `output_command` | `1` |
+| `SensorRegister` | `16#0258` |
+| `ThresholdRegister` | `16#01F4` |
+| `OutputCommandRegister` | `16#0001` |
+
+Проверка Modbus-состояния после запуска PLC:
+
+```bash
+python3 modbus-simulator/modbus_client.py 127.0.0.1 --port 1502 read-holding 0 3
+```
+
+Результат:
+
+```text
+[600, 1, 500]
+```
+
+Проверка успеха:
+
+- Проект хранит remote runtime URI `ERPC://10.42.0.211:3000`.
+- Beremiz CLI подключается к runtime без `--uri`, используя `beremiz.xml`.
+- Две последовательные проверки `timeout 5s ... --keep connect` не ломают runtime; после них `scripts/check_runtime_status.py` показывает `PLC Status: Started`.
+- IDE запускается с проектом в доступной GUI-сессии.
+- Переменные для ручного online monitoring перечислены и привязаны к текущей Modbus-карте.
+
+Вывод:
+
+- Стенд готов к ручной проверке Beremiz IDE online view: runtime уже удаленный, compatibility extension работает на плате, URI хранится в проекте.
+
+Следующий шаг:
+
+- Шаг 9: добавить простую процедуру демонстрации — менять `sensor_value` в simulator ниже/выше `threshold` и наблюдать переключение `alarm`/`output_command` в IDE и Modbus register `1`.

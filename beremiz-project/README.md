@@ -8,6 +8,12 @@
 beremiz beremiz-project/study-plc
 ```
 
+Проект хранит remote runtime URI в `beremiz.xml`:
+
+```text
+ERPC://10.42.0.211:3000
+```
+
 CLI-проверка загрузки проекта:
 
 ```bash
@@ -108,3 +114,16 @@ scripts/stop_runtime_on_visionfive.sh
 The runtime URI is `ERPC://10.42.0.211:3000`.
 
 `scripts/start_runtime_on_visionfive.sh` loads `scripts/beremiz_runtime_compat_15.py` on VisionFive 2 when the file is present. This keeps the Beremiz 1.4 runtime eRPC log messages compatible with the Beremiz 1.5 CLI/IDE on the PC.
+
+Useful variables for IDE online monitoring:
+
+| Variable | Expected value when simulator registers are `[600, 1, 500]` |
+| --- | --- |
+| `sensor_value` | `600` |
+| `threshold` | `500` |
+| `remote_output_echo` | `1` |
+| `alarm` | `TRUE` |
+| `output_command` | `1` |
+| `SensorRegister` | `16#0258` |
+| `ThresholdRegister` | `16#01F4` |
+| `OutputCommandRegister` | `16#0001` |
