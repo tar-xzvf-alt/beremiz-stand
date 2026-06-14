@@ -65,13 +65,46 @@ Bridge behavior:
 5. Write `sensor_value` to Modbus holding register `0`.
 6. PLC reads the new registers and overwrites register `1` with computed `output_command`.
 
-## Expected Demo
+## Demo
 
 ```text
 LOW:  raw packet sensor=400 threshold=500 forced_output=1 -> PLC writes register 1 = 0
 HIGH: raw packet sensor=600 threshold=500 forced_output=0 -> PLC writes register 1 = 1
 LOW:  raw packet sensor=250 threshold=500 forced_output=1 -> PLC writes register 1 = 0
 ```
+
+Фактически проверено на стенде:
+
+- ПК sender interface: `enp2s0` (`10.42.0.1`).
+- VisionFive 2 bridge interface: `end1` (`10.42.0.211`).
+- Beremiz runtime URI: `ERPC://10.42.0.211:3000`.
+- Modbus simulator: `10.42.0.1:1502`.
+
+Подготовка:
+
+```bash
+./scripts/sync_to_visionfive.sh
+./scripts/start_runtime_on_visionfive.sh
+./scripts/deploy_run_on_visionfive_runtime.sh
+./scripts/start_raw_eth_bridge_on_visionfive.sh
+```
+
+Запуск demo на ПК требует root/CAP_NET_RAW для raw socket:
+
+```bash
+sudo /usr/bin/python3 scripts/demo_raw_ethernet_alarm.py --interface enp2s0
+```
+
+Успешный результат:
+
+```text
+LOW: sent=29 sequence=1 sensor=400 threshold=500 forced_output=1 final=[400, 0, 500]
+HIGH: sent=29 sequence=2 sensor=600 threshold=500 forced_output=0 final=[600, 1, 500]
+LOW-AGAIN: sent=29 sequence=3 sensor=250 threshold=500 forced_output=1 final=[250, 0, 500]
+raw Ethernet demo passed
+```
+
+Bridge log показывает состояние сразу после записи raw-пакета в Modbus. Demo затем ждет, пока PLC прочитает регистры и перезапишет register `1` вычисленным `output_command`.
 
 ## Planned Files
 
