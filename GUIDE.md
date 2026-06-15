@@ -1,6 +1,6 @@
 # Пошаговое Руководство
 
-Это практическая инструкция по запуску учебного стенда Beremiz: ПК разработчика, VisionFive 2 как Linux PLC-контроллер и Modbus TCP simulator на ПК.
+Это практическая инструкция по запуску учебного стенда Beremiz. Базовый сценарий использует ПК разработчика, VisionFive 2 как Linux PLC-контроллер и Modbus TCP simulator на ПК. Экспериментальная raw Ethernet схема использует RockPI как отдельный отправитель request packets на VisionFive.
 
 ## 1. Проверить Схему Стенда
 
@@ -12,6 +12,8 @@
 | VisionFive 2 | `10.42.0.211` |
 | Beremiz runtime на VisionFive 2 | `ERPC://10.42.0.211:3000` |
 | Modbus simulator на ПК | `10.42.0.1:1502` |
+| VisionFive `end0` для RockPI | `10.43.0.1/24` |
+| RockPI `end0` | `10.43.0.2/24` |
 
 Проверка связи с платой:
 
@@ -19,6 +21,8 @@
 ping -c 3 10.42.0.211
 ssh root@10.42.0.211 true
 ```
+
+Для raw Ethernet/RockPI схемы `end1` на VisionFive остается для ПК, а `end0` используется только для point-to-point линка с RockPI.
 
 ## 2. Запустить Modbus TCP Simulator
 
@@ -208,7 +212,119 @@ OutputCommandRegister := UINT_TO_WORD(output_command);
 
 Beremiz Modbus client читает holding registers `0..2` из simulator и пишет `output_command` обратно в holding register `1`.
 
-## 12. Частые Проблемы
+## 12. Direct Raw Ethernet С RockPI
+
+Этот раздел относится к ветке `experiment/raw-ethernet-plc`. В нем ПК не является отправителем control packets. ПК только управляет стендом через VisionFive `end1`, а raw Ethernet обмен идет по отдельному линку:
+
+```text
+RockPI end0 <-> VisionFive end0
+```
+
+### 12.1. Настроить Link VisionFive `end0`
+
+На ПК из корня репозитория:
+
+```bash
+scripts/configure_rockpi_link_on_visionfive.sh
+```
+
+Ожидаемый адрес на VisionFive:
+
+```text
+end0: 10.43.0.1/24
+```
+
+RockPI должен иметь:
+
+```text
+end0: 10.43.0.2/24
+```
+
+RockPI console доступна через serial:
+
+```bash
+tio -b 1500000 /dev/ttyUSB0
+```
+
+### 12.2. Собрать И Запустить Direct Raw PLC
+
+Синхронизировать и собрать direct raw project на VisionFive:
+
+```bash
+scripts/sync_to_visionfive.sh
+scripts/build_direct_raw_on_visionfive.sh
+```
+
+Запустить runtime так, чтобы raw receiver слушал VisionFive `end0`:
+
+```bash
+scripts/stop_runtime_on_visionfive.sh root@10.42.0.211 /root/beremiz-runtime/direct-raw-plc
+scripts/start_direct_raw_runtime_on_visionfive.sh root@10.42.0.211 end0
+scripts/deploy_run_direct_raw_on_visionfive_runtime.sh
+```
+
+Проверить, что PLC started:
+
+```bash
+/usr/bin/python3 scripts/check_runtime_status.py ERPC://10.42.0.211:3000
+```
+
+В runtime log должна быть строка:
+
+```text
+direct raw receiver listening on end0, EtherType=0x1122
+```
+
+### 12.3. Собрать Controller Tool На RockPI
+
+Если `/root/device-controller` на RockPI еще не создан, перенесите исходники через VisionFive:
+
+```bash
+ssh root@10.42.0.211 'scp -r /root/beremiz-stand/device-controller root@10.43.0.2:/root/device-controller'
+```
+
+Собрать на RockPI:
+
+```bash
+ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller && make clean && make"'
+```
+
+### 12.4. Проверить Once Exchange
+
+Запустить одиночный request/response с RockPI:
+
+```bash
+ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller && ./controller-once -i end0 --sequence 2003 --sensor 600 --threshold 500 --forced-output 0 --timeout-ms 2000"'
+```
+
+Ожидаемый вывод:
+
+```text
+sent request seq=2003 bytes=30 sensor=600 threshold=500 forced_output=0
+received response seq=2003 output=1 status=0
+```
+
+Смысл проверки:
+
+```text
+sensor=600 > threshold=500 -> PLC output_command=1
+```
+
+Проверить логи VisionFive:
+
+```bash
+ssh root@10.42.0.211 'tail -n 40 /root/beremiz-runtime/direct-raw-plc/beremiz_service.log'
+```
+
+Ожидаемые строки:
+
+```text
+direct raw recv request seq=2003 sensor=600 threshold=500 forced_output=0
+direct raw plc seq=2003 sensor=600 threshold=500 forced_output=0 output=1
+direct raw send response seq=2003 output=1 status=0
+```
+
+## 13. Частые Проблемы
 
 ### Simulator Не Отвечает
 
@@ -241,3 +357,29 @@ scripts/deploy_run_on_visionfive_runtime.sh
 ### CLI/IDE Падает На `GetLogMessage`
 
 Runtime должен стартовать через `scripts/start_runtime_on_visionfive.sh`, потому что этот скрипт подключает `scripts/beremiz_runtime_compat_15.py`. Extension делает runtime Beremiz `1.4` совместимым с клиентом Beremiz `1.5` на ПК.
+
+### Direct Raw Runtime Слушает Не Тот Интерфейс
+
+Для RockPI-схемы runtime должен быть запущен через:
+
+```bash
+scripts/start_direct_raw_runtime_on_visionfive.sh root@10.42.0.211 end0
+```
+
+Если в log видно `direct raw receiver listening on end1`, значит запущен старый runtime path для PC-side smoke-test.
+
+### RockPI Не Доступен По SSH
+
+Проверьте link с VisionFive:
+
+```bash
+ssh root@10.42.0.211 'ping -c 2 10.43.0.2'
+```
+
+Если ping работает, но SSH не работает, используйте serial console:
+
+```bash
+tio -b 1500000 /dev/ttyUSB0
+```
+
+и проверьте `/root/.ssh/authorized_keys` на RockPI.

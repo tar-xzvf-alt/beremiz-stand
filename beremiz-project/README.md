@@ -1,6 +1,11 @@
 # Beremiz Project
 
-`study-plc/` создан штатным API установленного Beremiz (`ProjectController.NewProject`) и является начальным пустым PLC-проектом стенда.
+В каталоге лежат два Beremiz project variants:
+
+- `study-plc/`: базовый Modbus TCP project.
+- `direct-raw-plc/`: экспериментальный raw Ethernet project для RockPI/VisionFive схемы без Modbus в control loop.
+
+`study-plc/` создан штатным API установленного Beremiz (`ProjectController.NewProject`) и является начальным PLC-проектом стенда.
 
 Открытие в IDE:
 
@@ -137,3 +142,63 @@ scripts/deploy_run_on_visionfive_runtime.sh
 ```
 
 The demo forces Modbus register `1` to the wrong value before each case, then waits until the PLC overwrites it with the expected `output_command`.
+
+## Direct Raw PLC
+
+`direct-raw-plc` использует ту же учебную логику `alarm := sensor_value > threshold`, но входы приходят не из Modbus, а из raw Ethernet receiver внутри Beremiz `c_ext`.
+
+Схема runtime:
+
+```text
+RockPI end0
+  controller-once / future controller-loop
+  raw Ethernet v2 request
+        |
+        v
+VisionFive end0
+  Beremiz runtime direct-raw-plc
+  c_ext raw socket receiver
+  PLC ST logic
+  c_ext raw Ethernet response
+        |
+        v
+RockPI end0
+```
+
+External variables, объявленные в `c_ext_0@c_ext/cfile.xml`:
+
+| Variable | Direction in PLC logic | Meaning |
+| --- | --- | --- |
+| `RawSensorValue` | input | `sensor_value` from raw request |
+| `RawThreshold` | input | threshold from raw request |
+| `RawForcedOutput` | input | remote echo/test value from raw request |
+| `RawSequence` | input | request sequence id |
+| `RawOutputCommand` | output | PLC-computed output sent in raw response |
+
+Build on VisionFive 2:
+
+```bash
+scripts/sync_to_visionfive.sh
+scripts/build_direct_raw_on_visionfive.sh
+```
+
+Run with raw receiver on VisionFive `end0`:
+
+```bash
+scripts/configure_rockpi_link_on_visionfive.sh
+scripts/stop_runtime_on_visionfive.sh root@10.42.0.211 /root/beremiz-runtime/direct-raw-plc
+scripts/start_direct_raw_runtime_on_visionfive.sh root@10.42.0.211 end0
+scripts/deploy_run_direct_raw_on_visionfive_runtime.sh
+```
+
+Verified RockPI once exchange:
+
+```bash
+ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller && ./controller-once -i end0 --sequence 2003 --sensor 600 --threshold 500 --forced-output 0 --timeout-ms 2000"'
+```
+
+Expected response:
+
+```text
+received response seq=2003 output=1 status=0
+```

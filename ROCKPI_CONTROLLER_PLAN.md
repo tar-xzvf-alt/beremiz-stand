@@ -9,9 +9,10 @@
 - `beremiz-project/direct-raw-plc` запускается на VisionFive 2.
 - Beremiz `c_ext` внутри runtime принимает raw Ethernet frames с EtherType `0x1122`.
 - PLC получает значения напрямую через external variables, без Modbus simulator.
-- `scripts/demo_direct_raw_ethernet.py` проверяет цепочку `PC raw sender -> VisionFive Beremiz runtime -> PLC logic`.
+- `device-controller/controller-once` проверяет цепочку `RockPI end0 -> VisionFive end0 -> Beremiz PLC -> raw Ethernet response -> RockPI end0`.
+- `scripts/demo_direct_raw_ethernet.py` оставлен как PC-side smoke-test direct raw path без RockPI.
 
-Текущий demo все еще использует ПК как отправитель raw Ethernet packets. Следующий этап должен убрать ПК из control loop.
+ПК уже убран из raw Ethernet control loop: он используется для SSH/ERPC/monitoring через VisionFive `end1`.
 
 ## Целевая Топология
 

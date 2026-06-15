@@ -4,9 +4,19 @@
 
 Цель: проверить сценарий, где внешнее устройство отправляет raw Ethernet packet на VisionFive 2, а PLC-логика Beremiz реагирует на полученные данные.
 
+Текущий результат ветки: raw Ethernet packets отправляет отдельный RockPI по своему `end0` в VisionFive `end0`; Beremiz runtime на VisionFive принимает request внутри `c_ext`, PLC вычисляет `output_command`, а VisionFive отправляет raw Ethernet response обратно на RockPI. ПК остается engineering/monitoring station на VisionFive `end1`.
+
+```text
+ПК <-> VisionFive end1
+  SSH / Beremiz ERPC / monitoring
+
+RockPI end0 <-> VisionFive end0
+  raw Ethernet request/response, EtherType 0x1122
+```
+
 ## Выбранный Вариант
 
-Используется вариант A: отдельный bridge на VisionFive 2 принимает raw Ethernet packet и перекладывает данные в существующий Modbus TCP simulator на ПК. PLC остается без изменений и продолжает читать `sensor_value`, `output_command`, `threshold` через уже настроенный Beremiz Modbus TCP client.
+Первый MVP использовал вариант A: отдельный bridge на VisionFive 2 принимает raw Ethernet packet и перекладывает данные в существующий Modbus TCP simulator на ПК. PLC остается без изменений и продолжает читать `sensor_value`, `output_command`, `threshold` через уже настроенный Beremiz Modbus TCP client.
 
 ```text
 ПК device-sender
@@ -24,7 +34,7 @@ Beremiz PLC on VisionFive 2
   writes output_command to Modbus register 1
 ```
 
-Это не финальная глубокая интеграция raw Ethernet в Beremiz runtime. Это MVP для проверки end-to-end поведения и GUI-наблюдения без изменения PLC-программы.
+Это был промежуточный MVP для проверки end-to-end поведения и GUI-наблюдения без изменения PLC-программы. Текущий direct raw вариант ниже уже убирает Modbus из raw Ethernet control loop.
 
 ## Почему Не Встраиваем Raw Socket Сразу В PLC
 
@@ -106,7 +116,7 @@ raw Ethernet demo passed
 
 Bridge log показывает состояние сразу после записи raw-пакета в Modbus. Demo затем ждет, пока PLC прочитает регистры и перезапишет register `1` вычисленным `output_command`.
 
-## Planned Files
+## Initial Planned Files
 
 ```text
 raw-ethernet/send_raw_packet.py          # PC-side device sender
@@ -130,12 +140,12 @@ git switch -c experiment/raw-ethernet-plc
 Схема:
 
 ```text
-ПК device-sender
+device sender
   raw Ethernet frame, EtherType 0x1122
         |
         v
 VisionFive 2 Beremiz runtime
-  c_ext raw socket receiver on end1
+  c_ext raw socket receiver
   updates external PLC variables directly
         |
         v
@@ -158,14 +168,14 @@ scripts/deploy_run_direct_raw_on_visionfive_runtime.sh
 scripts/demo_direct_raw_ethernet.py
 ```
 
-Подготовка и запуск direct raw project:
+Первичная проверка direct raw project выполнялась с ПК как временным sender. Это больше не целевой control loop, но полезно как smoke-test без RockPI:
 
 ```bash
 ./scripts/sync_to_visionfive.sh
 ./scripts/build_direct_raw_on_visionfive.sh
 ./scripts/stop_raw_eth_bridge_on_visionfive.sh
-./scripts/stop_runtime_on_visionfive.sh root@10.42.0.211 /root/beremiz-runtime/study-plc
-./scripts/start_runtime_on_visionfive.sh root@10.42.0.211 /root/beremiz-runtime/direct-raw-plc 10.42.0.211 3000
+./scripts/stop_runtime_on_visionfive.sh root@10.42.0.211 /root/beremiz-runtime/direct-raw-plc
+./scripts/start_direct_raw_runtime_on_visionfive.sh root@10.42.0.211 end1
 ./scripts/deploy_run_direct_raw_on_visionfive_runtime.sh
 ```
 
@@ -207,3 +217,75 @@ HIGH: sent=29 sequence=1781465090 sensor=600 threshold=500 forced_output=0 outpu
 LOW-AGAIN: sent=29 sequence=1781465091 sensor=250 threshold=500 forced_output=1 output=0
 direct raw Ethernet demo passed
 ```
+
+## RockPI Request/Response Variant
+
+Текущая целевая схема переносит sender с ПК на RockPI и добавляет raw Ethernet response от VisionFive обратно на устройство:
+
+```text
+RockPI end0, 10.43.0.2/24
+  device-controller/controller-once
+  raw Ethernet v2 request
+        |
+        v
+VisionFive end0, 10.43.0.1/24
+  Beremiz runtime direct-raw-plc
+  c_ext receives request
+  PLC computes output_command
+  c_ext sends raw Ethernet v2 response
+        |
+        v
+RockPI receives response
+```
+
+ПК подключен к VisionFive по `end1` (`10.42.0.211/24`) и используется только для SSH/ERPC/monitoring.
+
+Protocol v2 payload, network byte order:
+
+| Field | Type | Request Meaning | Response Meaning |
+| --- | --- | --- | --- |
+| `magic` | `4s` | `BETH` | `BETH` |
+| `version` | `u8` | `2` | `2` |
+| `msg_type` | `u8` | `1=request` | `2=response` |
+| `sequence` | `u32` | request id | echoed request id |
+| `value0` | `u16` | `sensor_value` | `output_command` |
+| `value1` | `u16` | `threshold` | `status` |
+| `value2` | `u16` | `forced_output` | reserved |
+
+Ключевые файлы:
+
+```text
+device-controller/controller-once.c
+device-controller/raw_proto.h
+scripts/configure_rockpi_link_on_visionfive.sh
+scripts/start_direct_raw_runtime_on_visionfive.sh
+ROCKPI_CONTROLLER_PLAN.md
+```
+
+Проверенный запуск:
+
+```bash
+./scripts/configure_rockpi_link_on_visionfive.sh
+./scripts/stop_runtime_on_visionfive.sh root@10.42.0.211 /root/beremiz-runtime/direct-raw-plc
+./scripts/start_direct_raw_runtime_on_visionfive.sh root@10.42.0.211 end0
+./scripts/deploy_run_direct_raw_on_visionfive_runtime.sh
+ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller && ./controller-once -i end0 --sequence 2003 --sensor 600 --threshold 500 --forced-output 0 --timeout-ms 2000"'
+```
+
+Проверенный результат на RockPI:
+
+```text
+sent request seq=2003 bytes=30 sensor=600 threshold=500 forced_output=0
+received response seq=2003 output=1 status=0
+```
+
+Runtime log на VisionFive:
+
+```text
+direct raw receiver listening on end0, EtherType=0x1122
+direct raw recv request seq=2003 sensor=600 threshold=500 forced_output=0
+direct raw plc seq=2003 sensor=600 threshold=500 forced_output=0 output=1
+direct raw send response seq=2003 output=1 status=0
+```
+
+Следующий практический этап: `controller-loop` на RockPI без GPIO, затем GPIO edge -> request -> response -> GPIO output.
