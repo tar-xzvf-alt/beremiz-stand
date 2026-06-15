@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/ioctl.h>
 #include <sys/time.h>
 #include <unistd.h>
 ]]></xhtml:p>
@@ -26,18 +27,27 @@
   <globals>
     <xhtml:p><![CDATA[
 #define RAW_ETHERTYPE 0x1122
-#define RAW_PAYLOAD_SIZE 15
+#define RAW_V1_PAYLOAD_SIZE 15
+#define RAW_V2_PAYLOAD_SIZE 16
+#define RAW_V2_REQUEST 1
+#define RAW_V2_RESPONSE 2
+#define RAW_V2_STATUS_OK 0
 
 static pthread_t raw_thread;
 static pthread_mutex_t raw_lock = PTHREAD_MUTEX_INITIALIZER;
 static volatile int raw_running = 0;
 static int raw_socket_fd = -1;
 static char raw_interface[IFNAMSIZ] = "end1";
+static int raw_ifindex = 0;
+static unsigned char raw_local_mac[ETH_ALEN];
 
 static uint32_t raw_state_sequence = 0;
 static uint16_t raw_state_sensor = 0;
 static uint16_t raw_state_threshold = 500;
 static uint16_t raw_state_forced_output = 0;
+static uint8_t raw_state_version = 0;
+static int raw_response_pending = 0;
+static unsigned char raw_response_mac[ETH_ALEN];
 
 static uint32_t raw_last_logged_sequence = 0;
 static uint16_t raw_last_logged_output = 0xffff;
@@ -54,14 +64,91 @@ static uint32_t read_be32(const unsigned char *ptr)
 }
 
 static void store_raw_packet(uint32_t sequence, uint16_t sensor,
-    uint16_t threshold, uint16_t forced_output)
+    uint16_t threshold, uint16_t forced_output, uint8_t version,
+    const unsigned char *source_mac)
 {
     pthread_mutex_lock(&raw_lock);
     raw_state_sequence = sequence;
     raw_state_sensor = sensor;
     raw_state_threshold = threshold;
     raw_state_forced_output = forced_output;
+    raw_state_version = version;
+    if (version == 2 && source_mac != NULL) {
+        memcpy(raw_response_mac, source_mac, ETH_ALEN);
+        raw_response_pending = 1;
+    }
     pthread_mutex_unlock(&raw_lock);
+}
+
+static int load_interface_info(int fd, const char *interface_name)
+{
+    struct ifreq ifr;
+
+    memset(&ifr, 0, sizeof(ifr));
+    strncpy(ifr.ifr_name, interface_name, IFNAMSIZ - 1);
+    if (ioctl(fd, SIOCGIFINDEX, &ifr) < 0)
+        return -1;
+    raw_ifindex = ifr.ifr_ifindex;
+
+    memset(&ifr, 0, sizeof(ifr));
+    strncpy(ifr.ifr_name, interface_name, IFNAMSIZ - 1);
+    if (ioctl(fd, SIOCGIFHWADDR, &ifr) < 0)
+        return -1;
+    memcpy(raw_local_mac, ifr.ifr_hwaddr.sa_data, ETH_ALEN);
+    return 0;
+}
+
+static void write_be16(unsigned char *ptr, uint16_t value)
+{
+    ptr[0] = (unsigned char)(value >> 8);
+    ptr[1] = (unsigned char)value;
+}
+
+static void write_be32(unsigned char *ptr, uint32_t value)
+{
+    ptr[0] = (unsigned char)(value >> 24);
+    ptr[1] = (unsigned char)(value >> 16);
+    ptr[2] = (unsigned char)(value >> 8);
+    ptr[3] = (unsigned char)value;
+}
+
+static void send_raw_response(uint32_t sequence, uint16_t output,
+    uint16_t status, const unsigned char *dest_mac)
+{
+    struct sockaddr_ll addr;
+    unsigned char frame[14 + RAW_V2_PAYLOAD_SIZE];
+    unsigned char *payload = frame + 14;
+
+    if (raw_socket_fd < 0 || raw_ifindex == 0)
+        return;
+
+    memcpy(frame, dest_mac, ETH_ALEN);
+    memcpy(frame + ETH_ALEN, raw_local_mac, ETH_ALEN);
+    write_be16(frame + 12, RAW_ETHERTYPE);
+
+    memcpy(payload, "BETH", 4);
+    payload[4] = 2;
+    payload[5] = RAW_V2_RESPONSE;
+    write_be32(payload + 6, sequence);
+    write_be16(payload + 10, output);
+    write_be16(payload + 12, status);
+    write_be16(payload + 14, 0);
+
+    memset(&addr, 0, sizeof(addr));
+    addr.sll_family = AF_PACKET;
+    addr.sll_ifindex = raw_ifindex;
+    addr.sll_halen = ETH_ALEN;
+    memcpy(addr.sll_addr, dest_mac, ETH_ALEN);
+
+    if (sendto(raw_socket_fd, frame, sizeof(frame), 0,
+        (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        printf("direct raw send response seq=%u failed: %s\n",
+            sequence, strerror(errno));
+    } else {
+        printf("direct raw send response seq=%u output=%u status=%u\n",
+            sequence, output, status);
+    }
+    fflush(stdout);
 }
 
 static void *raw_receiver_main(void *unused)
@@ -69,7 +156,6 @@ static void *raw_receiver_main(void *unused)
     struct sockaddr_ll addr;
     struct timeval timeout;
     unsigned char frame[2048];
-    unsigned int ifindex;
     int fd;
 
     (void)unused;
@@ -86,9 +172,9 @@ static void *raw_receiver_main(void *unused)
     timeout.tv_usec = 0;
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
-    ifindex = if_nametoindex(raw_interface);
-    if (ifindex == 0) {
-        printf("direct raw receiver unknown interface %s\n", raw_interface);
+    if (load_interface_info(fd, raw_interface) < 0) {
+        printf("direct raw receiver interface %s failed: %s\n", raw_interface,
+            strerror(errno));
         fflush(stdout);
         close(fd);
         raw_socket_fd = -1;
@@ -98,7 +184,7 @@ static void *raw_receiver_main(void *unused)
     memset(&addr, 0, sizeof(addr));
     addr.sll_family = AF_PACKET;
     addr.sll_protocol = htons(RAW_ETHERTYPE);
-    addr.sll_ifindex = ifindex;
+    addr.sll_ifindex = raw_ifindex;
     if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         printf("direct raw receiver bind %s failed: %s\n", raw_interface,
             strerror(errno));
@@ -119,6 +205,8 @@ static void *raw_receiver_main(void *unused)
         uint16_t sensor;
         uint16_t threshold;
         uint16_t forced_output;
+        uint8_t version;
+        uint8_t msg_type;
 
         if (length < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
@@ -127,30 +215,52 @@ static void *raw_receiver_main(void *unused)
             fflush(stdout);
             break;
         }
-        if (length < 14 + RAW_PAYLOAD_SIZE)
+        if (length < 14 + RAW_V1_PAYLOAD_SIZE)
             continue;
         if (read_be16(frame + 12) != RAW_ETHERTYPE)
             continue;
 
         payload = frame + 14;
-        if (memcmp(payload, "BETH", 4) != 0 || payload[4] != 1)
+        if (memcmp(payload, "BETH", 4) != 0)
             continue;
+        version = payload[4];
 
-        sequence = read_be32(payload + 5);
-        sensor = read_be16(payload + 9);
-        threshold = read_be16(payload + 11);
-        forced_output = read_be16(payload + 13);
+        if (version == 1) {
+            sequence = read_be32(payload + 5);
+            sensor = read_be16(payload + 9);
+            threshold = read_be16(payload + 11);
+            forced_output = read_be16(payload + 13);
+        } else if (version == 2) {
+            if (length < 14 + RAW_V2_PAYLOAD_SIZE)
+                continue;
+            msg_type = payload[5];
+            if (msg_type != RAW_V2_REQUEST)
+                continue;
+            sequence = read_be32(payload + 6);
+            sensor = read_be16(payload + 10);
+            threshold = read_be16(payload + 12);
+            forced_output = read_be16(payload + 14);
+        } else {
+            continue;
+        }
         if (forced_output > 1)
             continue;
 
-        store_raw_packet(sequence, sensor, threshold, forced_output);
-        printf("direct raw recv seq=%u sensor=%u threshold=%u forced_output=%u\n",
-            sequence, sensor, threshold, forced_output);
+        store_raw_packet(sequence, sensor, threshold, forced_output, version,
+            frame + ETH_ALEN);
+        if (version == 2) {
+            printf("direct raw recv request seq=%u sensor=%u threshold=%u forced_output=%u\n",
+                sequence, sensor, threshold, forced_output);
+        } else {
+            printf("direct raw recv seq=%u sensor=%u threshold=%u forced_output=%u\n",
+                sequence, sensor, threshold, forced_output);
+        }
         fflush(stdout);
     }
 
     close(fd);
     raw_socket_fd = -1;
+    raw_ifindex = 0;
     return NULL;
 }
 ]]></xhtml:p>
@@ -200,6 +310,22 @@ if (RawSequence != raw_last_logged_sequence ||
     fflush(stdout);
     raw_last_logged_sequence = RawSequence;
     raw_last_logged_output = RawOutputCommand;
+}
+
+{
+    unsigned char dest_mac[ETH_ALEN];
+    int should_respond = 0;
+
+    pthread_mutex_lock(&raw_lock);
+    if (raw_state_version == 2 && raw_response_pending) {
+        memcpy(dest_mac, raw_response_mac, ETH_ALEN);
+        raw_response_pending = 0;
+        should_respond = 1;
+    }
+    pthread_mutex_unlock(&raw_lock);
+
+    if (should_respond)
+        send_raw_response(RawSequence, RawOutputCommand, RAW_V2_STATUS_OK, dest_mac);
 }
 ]]></xhtml:p>
   </publishFunction>

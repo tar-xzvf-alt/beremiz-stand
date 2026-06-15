@@ -124,6 +124,59 @@ sent request seq=...
 received response seq=... output=1 status=0
 ```
 
+Первый smoke-test выполнен с ПК вместо RockPI на существующем линке `PC enp2s0 <-> VisionFive end1`, пока физический линк `RockPI <-> VisionFive end0` еще не настроен.
+
+Команда:
+
+```bash
+sudo ./device-controller/controller-once -i enp2s0 --sequence 1001 --sensor 600 --threshold 500 --forced-output 0 --timeout-ms 2000
+```
+
+Вывод `controller-once`:
+
+```text
+sent request seq=1001 bytes=30 sensor=600 threshold=500 forced_output=0
+received response seq=1001 output=1 status=0
+```
+
+Runtime log на VisionFive:
+
+```text
+direct raw recv request seq=1001 sensor=600 threshold=500 forced_output=0
+direct raw plc seq=1001 sensor=600 threshold=500 forced_output=0 output=1
+direct raw send response seq=1001 output=1 status=0
+```
+
+Это подтверждает protocol v2 `request -> PLC -> response` без GPIO. Следующий шаг этого этапа: повторить тот же once exchange через `VisionFive end0 <-> RockPI Ethernet`.
+
+Также проверен retry/duplicate сценарий: два одинаковых request с одним `sequence` должны получать два response. Это нужно, чтобы controller мог повторить request после локального timeout или потери response.
+
+Команды:
+
+```bash
+sudo ./device-controller/controller-once -i enp2s0 --sequence 1003 --sensor 600 --threshold 500 --forced-output 0 --timeout-ms 2000
+sudo ./device-controller/controller-once -i enp2s0 --sequence 1003 --sensor 600 --threshold 500 --forced-output 0 --timeout-ms 2000
+```
+
+Вывод:
+
+```text
+sent request seq=1003 bytes=30 sensor=600 threshold=500 forced_output=0
+received response seq=1003 output=1 status=0
+sent request seq=1003 bytes=30 sensor=600 threshold=500 forced_output=0
+received response seq=1003 output=1 status=0
+```
+
+Runtime log:
+
+```text
+direct raw recv request seq=1003 sensor=600 threshold=500 forced_output=0
+direct raw plc seq=1003 sensor=600 threshold=500 forced_output=0 output=1
+direct raw send response seq=1003 output=1 status=0
+direct raw recv request seq=1003 sensor=600 threshold=500 forced_output=0
+direct raw send response seq=1003 output=1 status=0
+```
+
 ### Этап 3. RockPI Deploy Path
 
 После уточнения параметров RockPI добавить scripts:

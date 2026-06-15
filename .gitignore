@@ -5,3 +5,4 @@ venv/
 beremiz-project/*/build/
 beremiz-project/*/psk/
 .deps/
+device-controller/controller-once
