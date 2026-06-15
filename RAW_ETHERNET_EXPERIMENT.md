@@ -122,3 +122,70 @@ git switch -c experiment/raw-ethernet-plc
 ```
 
 Каждый завершенный шаг коммитится отдельно в этой ветке.
+
+## Direct Raw Ethernet Runtime Variant
+
+Следующий архитектурный шаг убирает Modbus simulator из raw Ethernet цепочки. Для этого добавлен отдельный Beremiz project variant: `beremiz-project/direct-raw-plc`.
+
+Схема:
+
+```text
+ПК device-sender
+  raw Ethernet frame, EtherType 0x1122
+        |
+        v
+VisionFive 2 Beremiz runtime
+  c_ext raw socket receiver on end1
+  updates external PLC variables directly
+        |
+        v
+PLC ST logic computes alarm/output_command
+```
+
+В этом варианте не используются:
+
+- внешний `scripts/raw_eth_to_modbus_bridge.py`;
+- Modbus TCP simulator;
+- Beremiz Modbus client confnode.
+
+Ключевые файлы:
+
+```text
+beremiz-project/direct-raw-plc/                 # отдельный direct raw project
+beremiz-project/direct-raw-plc/c_ext_0@c_ext/   # C extension с raw receiver thread
+scripts/build_direct_raw_on_visionfive.sh
+scripts/deploy_run_direct_raw_on_visionfive_runtime.sh
+```
+
+Подготовка и запуск direct raw project:
+
+```bash
+./scripts/sync_to_visionfive.sh
+./scripts/build_direct_raw_on_visionfive.sh
+./scripts/stop_raw_eth_bridge_on_visionfive.sh
+./scripts/stop_runtime_on_visionfive.sh root@10.42.0.211 /root/beremiz-runtime/study-plc
+./scripts/start_runtime_on_visionfive.sh root@10.42.0.211 /root/beremiz-runtime/direct-raw-plc 10.42.0.211 3000
+./scripts/deploy_run_direct_raw_on_visionfive_runtime.sh
+```
+
+Отправка raw Ethernet packets с ПК:
+
+```bash
+sudo /usr/bin/python3 raw-ethernet/send_raw_packet.py --interface enp2s0 --sequence 1 --sensor 400 --threshold 500 --forced-output 1
+sudo /usr/bin/python3 raw-ethernet/send_raw_packet.py --interface enp2s0 --sequence 2 --sensor 600 --threshold 500 --forced-output 0
+sudo /usr/bin/python3 raw-ethernet/send_raw_packet.py --interface enp2s0 --sequence 3 --sensor 250 --threshold 500 --forced-output 1
+```
+
+Проверенный runtime log на VisionFive 2:
+
+```text
+direct raw receiver listening on end1, EtherType=0x1122
+direct raw recv seq=1 sensor=400 threshold=500 forced_output=1
+direct raw plc seq=1 sensor=400 threshold=500 forced_output=1 output=0
+direct raw recv seq=2 sensor=600 threshold=500 forced_output=0
+direct raw plc seq=2 sensor=600 threshold=500 forced_output=0 output=1
+direct raw recv seq=3 sensor=250 threshold=500 forced_output=1
+direct raw plc seq=3 sensor=250 threshold=500 forced_output=1 output=0
+```
+
+Это подтверждает прямую цепочку `raw Ethernet -> Beremiz runtime c_ext -> PLC logic` без промежуточного Modbus слоя.

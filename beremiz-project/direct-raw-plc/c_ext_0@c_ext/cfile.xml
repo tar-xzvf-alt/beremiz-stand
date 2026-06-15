@@ -1,0 +1,206 @@
+<?xml version='1.0' encoding='utf-8'?>
+<CFile xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <includes>
+    <xhtml:p><![CDATA[
+#include <arpa/inet.h>
+#include <errno.h>
+#include <linux/if_packet.h>
+#include <net/ethernet.h>
+#include <net/if.h>
+#include <pthread.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <unistd.h>
+]]></xhtml:p>
+  </includes>
+  <variables>
+    <variable name="RawSensorValue" type="UINT" initial="0"/>
+    <variable name="RawThreshold" type="UINT" initial="500"/>
+    <variable name="RawForcedOutput" type="UINT" initial="0"/>
+    <variable name="RawSequence" type="UDINT" initial="0"/>
+    <variable name="RawOutputCommand" type="UINT" initial="0"/>
+  </variables>
+  <globals>
+    <xhtml:p><![CDATA[
+#define RAW_ETHERTYPE 0x1122
+#define RAW_PAYLOAD_SIZE 15
+
+static pthread_t raw_thread;
+static pthread_mutex_t raw_lock = PTHREAD_MUTEX_INITIALIZER;
+static volatile int raw_running = 0;
+static int raw_socket_fd = -1;
+static char raw_interface[IFNAMSIZ] = "end1";
+
+static uint32_t raw_state_sequence = 0;
+static uint16_t raw_state_sensor = 0;
+static uint16_t raw_state_threshold = 500;
+static uint16_t raw_state_forced_output = 0;
+
+static uint32_t raw_last_logged_sequence = 0;
+static uint16_t raw_last_logged_output = 0xffff;
+
+static uint16_t read_be16(const unsigned char *ptr)
+{
+    return ((uint16_t)ptr[0] << 8) | ptr[1];
+}
+
+static uint32_t read_be32(const unsigned char *ptr)
+{
+    return ((uint32_t)ptr[0] << 24) | ((uint32_t)ptr[1] << 16) |
+        ((uint32_t)ptr[2] << 8) | ptr[3];
+}
+
+static void store_raw_packet(uint32_t sequence, uint16_t sensor,
+    uint16_t threshold, uint16_t forced_output)
+{
+    pthread_mutex_lock(&raw_lock);
+    raw_state_sequence = sequence;
+    raw_state_sensor = sensor;
+    raw_state_threshold = threshold;
+    raw_state_forced_output = forced_output;
+    pthread_mutex_unlock(&raw_lock);
+}
+
+static void *raw_receiver_main(void *unused)
+{
+    struct sockaddr_ll addr;
+    struct timeval timeout;
+    unsigned char frame[2048];
+    unsigned int ifindex;
+    int fd;
+
+    (void)unused;
+
+    fd = socket(AF_PACKET, SOCK_RAW, htons(RAW_ETHERTYPE));
+    if (fd < 0) {
+        printf("direct raw receiver socket failed: %s\n", strerror(errno));
+        fflush(stdout);
+        return NULL;
+    }
+
+    raw_socket_fd = fd;
+    timeout.tv_sec = 1;
+    timeout.tv_usec = 0;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
+    ifindex = if_nametoindex(raw_interface);
+    if (ifindex == 0) {
+        printf("direct raw receiver unknown interface %s\n", raw_interface);
+        fflush(stdout);
+        close(fd);
+        raw_socket_fd = -1;
+        return NULL;
+    }
+
+    memset(&addr, 0, sizeof(addr));
+    addr.sll_family = AF_PACKET;
+    addr.sll_protocol = htons(RAW_ETHERTYPE);
+    addr.sll_ifindex = ifindex;
+    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        printf("direct raw receiver bind %s failed: %s\n", raw_interface,
+            strerror(errno));
+        fflush(stdout);
+        close(fd);
+        raw_socket_fd = -1;
+        return NULL;
+    }
+
+    printf("direct raw receiver listening on %s, EtherType=0x%04x\n",
+        raw_interface, RAW_ETHERTYPE);
+    fflush(stdout);
+
+    while (raw_running) {
+        ssize_t length = recv(fd, frame, sizeof(frame), 0);
+        const unsigned char *payload;
+        uint32_t sequence;
+        uint16_t sensor;
+        uint16_t threshold;
+        uint16_t forced_output;
+
+        if (length < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+                continue;
+            printf("direct raw receiver recv failed: %s\n", strerror(errno));
+            fflush(stdout);
+            break;
+        }
+        if (length < 14 + RAW_PAYLOAD_SIZE)
+            continue;
+        if (read_be16(frame + 12) != RAW_ETHERTYPE)
+            continue;
+
+        payload = frame + 14;
+        if (memcmp(payload, "BETH", 4) != 0 || payload[4] != 1)
+            continue;
+
+        sequence = read_be32(payload + 5);
+        sensor = read_be16(payload + 9);
+        threshold = read_be16(payload + 11);
+        forced_output = read_be16(payload + 13);
+        if (forced_output > 1)
+            continue;
+
+        store_raw_packet(sequence, sensor, threshold, forced_output);
+        printf("direct raw recv seq=%u sensor=%u threshold=%u forced_output=%u\n",
+            sequence, sensor, threshold, forced_output);
+        fflush(stdout);
+    }
+
+    close(fd);
+    raw_socket_fd = -1;
+    return NULL;
+}
+]]></xhtml:p>
+  </globals>
+  <initFunction>
+    <xhtml:p><![CDATA[
+const char *interface_name = getenv("RAW_ETH_INTERFACE");
+
+if (interface_name != NULL && interface_name[0] != '\0') {
+    strncpy(raw_interface, interface_name, sizeof(raw_interface) - 1);
+    raw_interface[sizeof(raw_interface) - 1] = '\0';
+}
+
+raw_running = 1;
+if (pthread_create(&raw_thread, NULL, raw_receiver_main, NULL) != 0) {
+    raw_running = 0;
+    printf("direct raw receiver thread failed: %s\n", strerror(errno));
+    fflush(stdout);
+}
+]]></xhtml:p>
+  </initFunction>
+  <cleanUpFunction>
+    <xhtml:p><![CDATA[
+raw_running = 0;
+if (raw_socket_fd >= 0)
+    close(raw_socket_fd);
+pthread_join(raw_thread, NULL);
+]]></xhtml:p>
+  </cleanUpFunction>
+  <retrieveFunction>
+    <xhtml:p><![CDATA[
+pthread_mutex_lock(&raw_lock);
+RawSensorValue = raw_state_sensor;
+RawThreshold = raw_state_threshold;
+RawForcedOutput = raw_state_forced_output;
+RawSequence = raw_state_sequence;
+pthread_mutex_unlock(&raw_lock);
+]]></xhtml:p>
+  </retrieveFunction>
+  <publishFunction>
+    <xhtml:p><![CDATA[
+if (RawSequence != raw_last_logged_sequence ||
+    RawOutputCommand != raw_last_logged_output) {
+    printf("direct raw plc seq=%u sensor=%u threshold=%u forced_output=%u output=%u\n",
+        RawSequence, RawSensorValue, RawThreshold, RawForcedOutput,
+        RawOutputCommand);
+    fflush(stdout);
+    raw_last_logged_sequence = RawSequence;
+    raw_last_logged_output = RawOutputCommand;
+}
+]]></xhtml:p>
+  </publishFunction>
+</CFile>
