@@ -261,6 +261,11 @@ device-controller/controller-gpio-loop.c
 device-controller/raw_proto.h
 scripts/configure_rockpi_link_on_visionfive.sh
 scripts/start_direct_raw_runtime_on_visionfive.sh
+scripts/deploy_controller_to_rockpi.sh
+scripts/build_controller_on_rockpi.sh
+scripts/run_controller_once_on_rockpi.sh
+scripts/run_controller_loop_on_rockpi.sh
+scripts/run_controller_gpio_loop_on_rockpi.sh
 ROCKPI_CONTROLLER_PLAN.md
 ```
 
@@ -271,52 +276,52 @@ ROCKPI_CONTROLLER_PLAN.md
 ./scripts/stop_runtime_on_visionfive.sh root@10.42.0.211 /root/beremiz-runtime/direct-raw-plc
 ./scripts/start_direct_raw_runtime_on_visionfive.sh root@10.42.0.211 end0
 ./scripts/deploy_run_direct_raw_on_visionfive_runtime.sh
-ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller && ./controller-once -i end0 --sequence 2003 --sensor 600 --threshold 500 --forced-output 0 --timeout-ms 2000"'
+./scripts/deploy_controller_to_rockpi.sh
+./scripts/build_controller_on_rockpi.sh
+./scripts/run_controller_once_on_rockpi.sh root@10.42.0.211 root@10.43.0.2 /root/device-controller end0 4101 600 500 0 2000
 ```
 
 Проверенный результат на RockPI:
 
 ```text
-sent request seq=2003 bytes=30 sensor=600 threshold=500 forced_output=0
-received response seq=2003 output=1 status=0
+sent request seq=4101 bytes=30 sensor=600 threshold=500 forced_output=0
+received response seq=4101 output=1 status=0
 ```
 
 Runtime log на VisionFive:
 
 ```text
 direct raw receiver listening on end0, EtherType=0x1122
-direct raw recv request seq=2003 sensor=600 threshold=500 forced_output=0
-direct raw plc seq=2003 sensor=600 threshold=500 forced_output=0 output=1
-direct raw send response seq=2003 output=1 status=0
+direct raw recv request seq=4101 sensor=600 threshold=500 forced_output=0
+direct raw plc seq=4101 sensor=600 threshold=500 forced_output=0 output=1
+direct raw send response seq=4101 output=1 status=0
 ```
 
 Проверенный `controller-loop` без GPIO:
 
 ```bash
-ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller && ./controller-loop -i end0 --sequence 3000 --count 6 --period-ms 200 --timeout-ms 2000"'
+./scripts/run_controller_loop_on_rockpi.sh root@10.42.0.211 root@10.43.0.2 /root/device-controller end0 4204 4 100 2000
 ```
 
 Результат:
 
 ```text
-cycle=1 seq=3000 sensor=400 threshold=500 forced_output=1 output=0 status=0
-cycle=2 seq=3001 sensor=600 threshold=500 forced_output=0 output=1 status=0
-cycle=3 seq=3002 sensor=400 threshold=500 forced_output=1 output=0 status=0
-cycle=4 seq=3003 sensor=600 threshold=500 forced_output=0 output=1 status=0
-cycle=5 seq=3004 sensor=400 threshold=500 forced_output=1 output=0 status=0
-cycle=6 seq=3005 sensor=600 threshold=500 forced_output=0 output=1 status=0
+cycle=1 seq=4204 sensor=400 threshold=500 forced_output=1 output=0 status=0
+cycle=2 seq=4205 sensor=600 threshold=500 forced_output=0 output=1 status=0
+cycle=3 seq=4206 sensor=400 threshold=500 forced_output=1 output=0 status=0
+cycle=4 seq=4207 sensor=600 threshold=500 forced_output=0 output=1 status=0
 ```
 
 GPIO target на RockPI:
 
 ```bash
-ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller && make controller-gpio-loop"'
+./scripts/build_controller_on_rockpi.sh
 ```
 
 Smoke-test запуска без внешнего GPIO edge:
 
 ```bash
-ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller && timeout 2s ./controller-gpio-loop -i end0 --sequence 4000 --count 1 --timeout-ms 1000"'
+./scripts/run_controller_gpio_loop_on_rockpi.sh root@10.42.0.211 root@10.43.0.2 /root/device-controller end0 4301 1000 1 2
 ```
 
 Результат:
@@ -326,3 +331,5 @@ controller-gpio-loop started iface=end0 gpio=/dev/gpiochip4 input=6 output=7
 ```
 
 Следующий практический этап: физический GPIO edge на RockPI line `6` и проверка изменения output line `7`.
+
+Ограничение проверки: raw controller tools нельзя запускать параллельно на одном RockPI `end0`, иначе они могут конкурировать за response frames одного EtherType `0x1122`.

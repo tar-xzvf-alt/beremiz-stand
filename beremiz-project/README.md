@@ -214,7 +214,10 @@ Expected alternating outputs: `0, 1, 0, 1, 0, 1`.
 GPIO controller target on RockPI:
 
 ```bash
-ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller && make controller-gpio-loop"'
+scripts/deploy_controller_to_rockpi.sh
+scripts/build_controller_on_rockpi.sh
 ```
 
 Default GPIO mapping is `/dev/gpiochip4`, input line `6`, output line `7`. Smoke-test without an external edge starts successfully and waits for GPIO input; a full functional test requires a physical edge on line `6`.
+
+Use `scripts/run_controller_once_on_rockpi.sh`, `scripts/run_controller_loop_on_rockpi.sh`, and `scripts/run_controller_gpio_loop_on_rockpi.sh` sequentially. Do not run multiple raw controller programs on RockPI `end0` at the same time.

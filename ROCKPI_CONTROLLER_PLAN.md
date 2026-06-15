@@ -265,11 +265,14 @@ received response seq=2002 output=0 status=0
 
 ### Этап 3. RockPI Deploy Path
 
-После уточнения параметров RockPI добавить scripts:
+Добавлены scripts:
 
 ```text
-scripts/build_controller_on_rockpi.sh
 scripts/deploy_controller_to_rockpi.sh
+scripts/build_controller_on_rockpi.sh
+scripts/run_controller_once_on_rockpi.sh
+scripts/run_controller_loop_on_rockpi.sh
+scripts/run_controller_gpio_loop_on_rockpi.sh
 ```
 
 Нужные параметры:
@@ -279,6 +282,15 @@ scripts/deploy_controller_to_rockpi.sh
 - способ настройки link `RockPI <-> VisionFive end0`;
 - наличие compiler/libgpiod;
 - путь установки бинарника.
+
+Проверенный deploy/build flow:
+
+```bash
+scripts/deploy_controller_to_rockpi.sh
+scripts/build_controller_on_rockpi.sh
+```
+
+`deploy_controller_to_rockpi.sh` переносит archive через VisionFive и нормализует timestamps на RockPI, чтобы `make` не предупреждал о clock skew.
 
 ### Этап 4. Controller Loop Без GPIO
 
@@ -298,18 +310,16 @@ scripts/deploy_controller_to_rockpi.sh
 Проверенный запуск на RockPI:
 
 ```bash
-ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller && ./controller-loop -i end0 --sequence 3000 --count 6 --period-ms 200 --timeout-ms 2000"'
+scripts/run_controller_loop_on_rockpi.sh root@10.42.0.211 root@10.43.0.2 /root/device-controller end0 4204 4 100 2000
 ```
 
 Результат:
 
 ```text
-cycle=1 seq=3000 sensor=400 threshold=500 forced_output=1 output=0 status=0
-cycle=2 seq=3001 sensor=600 threshold=500 forced_output=0 output=1 status=0
-cycle=3 seq=3002 sensor=400 threshold=500 forced_output=1 output=0 status=0
-cycle=4 seq=3003 sensor=600 threshold=500 forced_output=0 output=1 status=0
-cycle=5 seq=3004 sensor=400 threshold=500 forced_output=1 output=0 status=0
-cycle=6 seq=3005 sensor=600 threshold=500 forced_output=0 output=1 status=0
+cycle=1 seq=4204 sensor=400 threshold=500 forced_output=1 output=0 status=0
+cycle=2 seq=4205 sensor=600 threshold=500 forced_output=0 output=1 status=0
+cycle=3 seq=4206 sensor=400 threshold=500 forced_output=1 output=0 status=0
+cycle=4 seq=4207 sensor=600 threshold=500 forced_output=0 output=1 status=0
 ```
 
 Это завершает сетевой cyclic этап без GPIO. Следующий этап: заменить timer-driven cycle на GPIO edge-driven cycle.
@@ -352,7 +362,7 @@ wait GPIO edge
 Build на RockPI:
 
 ```bash
-ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller && make controller-gpio-loop"'
+scripts/build_controller_on_rockpi.sh
 ```
 
 Проверено на RockPI:
@@ -366,7 +376,7 @@ make controller-gpio-loop: success
 Smoke-test запуска без внешнего импульса:
 
 ```bash
-ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller && timeout 2s ./controller-gpio-loop -i end0 --sequence 4000 --count 1 --timeout-ms 1000"'
+scripts/run_controller_gpio_loop_on_rockpi.sh root@10.42.0.211 root@10.43.0.2 /root/device-controller end0 4301 1000 1 2
 ```
 
 Результат:
@@ -376,6 +386,8 @@ controller-gpio-loop started iface=end0 gpio=/dev/gpiochip4 input=6 output=7
 ```
 
 Functional test не завершен: нужен физический edge на RockPI input line `6`.
+
+Важно: `controller-once`, `controller-loop` и `controller-gpio-loop` нельзя запускать параллельно на одном RockPI `end0`, так как они конкурируют за raw Ethernet response frames одного EtherType `0x1122`.
 
 ### Этап 6. Monitoring / Demo
 

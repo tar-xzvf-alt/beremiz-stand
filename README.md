@@ -52,7 +52,7 @@ Starfive VisionFive 2
         | raw Ethernet request/response, EtherType 0x1122
         v
 RockPI end0, 10.43.0.2/24
-  device-controller/controller-once
+  device-controller/controller-once / controller-loop / controller-gpio-loop
 ```
 
 В этой схеме ПК не участвует в control loop: он только запускает, загружает и наблюдает стенд.
@@ -79,6 +79,11 @@ RockPI end0, 10.43.0.2/24
 | `scripts/demo_direct_raw_ethernet.py` | PC-side проверка direct raw path до появления RockPI |
 | `scripts/configure_rockpi_link_on_visionfive.sh` | Настройка VisionFive `end0` для линка с RockPI |
 | `scripts/start_direct_raw_runtime_on_visionfive.sh` | Запуск Beremiz runtime с `RAW_ETH_INTERFACE=end0` |
+| `scripts/deploy_controller_to_rockpi.sh` | Передача `device-controller/` на RockPI через VisionFive |
+| `scripts/build_controller_on_rockpi.sh` | Сборка `controller-once`, `controller-loop`, `controller-gpio-loop` на RockPI |
+| `scripts/run_controller_once_on_rockpi.sh` | Проверка одиночного RockPI raw Ethernet exchange |
+| `scripts/run_controller_loop_on_rockpi.sh` | Проверка циклического RockPI raw Ethernet loop без GPIO |
+| `scripts/run_controller_gpio_loop_on_rockpi.sh` | Запуск GPIO-driven RockPI controller loop |
 | `scripts/beremiz_runtime_compat_15.py` | Runtime compatibility layer для Beremiz 1.5 client -> 1.4 runtime |
 | `beremiz-modbus-source-20170318-alt1.noarch.rpm` | Offline RPM с Modbus C sources |
 
@@ -244,6 +249,8 @@ direct raw send response seq=2003 output=1 status=0
 Циклический RockPI loop без GPIO также проверен: 6 cycles с чередованием `sensor=400/600` вернули outputs `0,1,0,1,0,1`.
 
 GPIO controller собран на RockPI как отдельный target `make controller-gpio-loop`. Smoke-test запуска без внешнего импульса подтвердил захват `/dev/gpiochip4` lines `6/7` и cleanup; полный functional test требует физический edge на input line `6`.
+
+Не запускайте одновременно несколько RockPI controller programs на одном `end0`/EtherType `0x1122`: два raw socket consumers могут конкурировать за response frames. Проверки `controller-once`, `controller-loop` и `controller-gpio-loop` запускаются последовательно.
 
 ## Быстрый Старт
 
