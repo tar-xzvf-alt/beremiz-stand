@@ -147,7 +147,7 @@ direct raw plc seq=1001 sensor=600 threshold=500 forced_output=0 output=1
 direct raw send response seq=1001 output=1 status=0
 ```
 
-Это подтверждает protocol v2 `request -> PLC -> response` без GPIO. Следующий шаг этого этапа: повторить тот же once exchange через `VisionFive end0 <-> RockPI Ethernet`.
+Это подтверждает protocol v2 `request -> PLC -> response` без GPIO на временном PC sender link.
 
 Также проверен retry/duplicate сценарий: два одинаковых request с одним `sequence` должны получать два response. Это нужно, чтобы controller мог повторить request после локального timeout или потери response.
 
@@ -176,6 +176,89 @@ direct raw send response seq=1003 output=1 status=0
 direct raw recv request seq=1003 sensor=600 threshold=500 forced_output=0
 direct raw send response seq=1003 output=1 status=0
 ```
+
+### Этап 2.1. RockPI Once Exchange Через VisionFive `end0`
+
+Фактически поднят целевой Ethernet link:
+
+```text
+PC <-> VisionFive end1
+  10.42.0.211/24, SSH/ERPC остаются без изменений
+
+RockPI end0 <-> VisionFive end0
+  VisionFive end0: 10.43.0.1/24
+  RockPI end0:     10.43.0.2/24
+```
+
+RockPI console доступна через serial:
+
+```bash
+tio -b 1500000 /dev/ttyUSB0
+```
+
+Для non-interactive bring-up использовался прямой serial write/read через `/dev/ttyUSB0`; RockPI уже имел root shell. RockPI параметры:
+
+```text
+arch: aarch64
+kernel: 6.12.90-rt-alt1
+ethernet interface: end0
+RockPI end0 MAC: b6:1e:73:23:c5:45
+compiler: /bin/cc
+```
+
+VisionFive `end0` настраивается helper script:
+
+```bash
+./scripts/configure_rockpi_link_on_visionfive.sh
+```
+
+Direct raw runtime запускается на VisionFive с receiver на `end0`:
+
+```bash
+./scripts/stop_runtime_on_visionfive.sh root@10.42.0.211 /root/beremiz-runtime/direct-raw-plc
+./scripts/start_direct_raw_runtime_on_visionfive.sh root@10.42.0.211 end0
+./scripts/deploy_run_direct_raw_on_visionfive_runtime.sh
+```
+
+`controller-once` был перенесен на RockPI и собран там:
+
+```bash
+ssh root@10.42.0.211 'scp -r /root/beremiz-stand/device-controller root@10.43.0.2:/root/device-controller'
+ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller && make clean && make"'
+```
+
+Проверенный once exchange с RockPI:
+
+```bash
+ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller && ./controller-once -i end0 --sequence 2001 --sensor 600 --threshold 500 --forced-output 0 --timeout-ms 2000"'
+```
+
+Вывод RockPI:
+
+```text
+sent request seq=2001 bytes=30 sensor=600 threshold=500 forced_output=0
+received response seq=2001 output=1 status=0
+```
+
+Runtime log на VisionFive:
+
+```text
+direct raw receiver listening on end0, EtherType=0x1122
+direct raw recv request seq=2001 sensor=600 threshold=500 forced_output=0
+direct raw plc seq=2001 sensor=600 threshold=500 forced_output=0 output=1
+direct raw send response seq=2001 output=1 status=0
+```
+
+Проверен duplicate/retry на целевом RockPI link:
+
+```text
+sent request seq=2002 bytes=30 sensor=400 threshold=500 forced_output=1
+received response seq=2002 output=0 status=0
+sent request seq=2002 bytes=30 sensor=400 threshold=500 forced_output=1
+received response seq=2002 output=0 status=0
+```
+
+Это завершает первый сетевой этап: `RockPI end0 -> VisionFive end0 -> Beremiz PLC -> raw Ethernet response -> RockPI end0`, пока без GPIO.
 
 ### Этап 3. RockPI Deploy Path
 
