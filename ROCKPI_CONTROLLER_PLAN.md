@@ -87,7 +87,20 @@ magic=BETH, version=1, sequence, sensor, threshold, forced_output
 - RockPI должен игнорировать response с чужим `sequence`;
 - VisionFive должен отправлять response на source MAC request;
 - timeout на RockPI обязателен;
-- при timeout GPIO output должен переходить в безопасное состояние на этапе GPIO loop.
+- при timeout GPIO output остается без изменения, чтобы Arduino/rt-tester зафиксировал отсутствие ожидаемого edge.
+
+Measurement packet size profile:
+
+```text
+one raw Ethernet request frame per GPIO edge
+one raw Ethernet response frame per PLC answer
+frame size: 1514 bytes total
+payload size: 1500 bytes
+protocol v2 fields: first 16 payload bytes
+padding: zero-filled
+```
+
+Это intentionally не повторяет полный `rt-supervisor` logical message `96 KiB`; fragmentation/reassembly не включены, чтобы измерять влияние размера одного Ethernet frame при прежней PLC threshold logic.
 
 ## Этапы Работы
 
@@ -366,6 +379,7 @@ direct-raw-plc task period: T#10ms
 VisionFive raw receiver thread: SCHED_FIFO priority 80
 VisionFive PLC task thread: SCHED_FIFO priority 85
 RockPI controller-gpio-loop: SCHED_FIFO priority 80
+RockPI GPIO IRQ thread: SCHED_FIFO priority 99
 mlockall(MCL_CURRENT | MCL_FUTURE): enabled on both devices
 ```
 

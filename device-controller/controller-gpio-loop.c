@@ -3,6 +3,7 @@
 #include "raw_client.h"
 #include "raw_proto.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <gpiod.h>
 #include <pthread.h>
@@ -17,6 +18,8 @@
 #include <unistd.h>
 
 #define CONTROLLER_RT_PRIORITY 80
+#define GPIO_IRQ_RT_PRIORITY 99
+#define GPIO_CONSUMER "rockpi4-monitor"
 
 struct options {
 	const char *interface;
@@ -45,6 +48,79 @@ static void configure_realtime(void)
 
 	(void)pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp);
 	(void)mlockall(MCL_CURRENT | MCL_FUTURE);
+}
+
+static int read_proc_text(int pid, const char *name, char *buf, size_t size)
+{
+	char path[64];
+	FILE *file;
+	size_t length;
+
+	snprintf(path, sizeof(path), "/proc/%d/%s", pid, name);
+	file = fopen(path, "r");
+	if (file == NULL)
+		return -1;
+	length = fread(buf, 1, size - 1, file);
+	fclose(file);
+	if (length == 0)
+		return -1;
+	buf[length] = '\0';
+	for (size_t i = 0; i < length; i++) {
+		if (buf[i] == '\0' || buf[i] == '\n')
+			buf[i] = ' ';
+	}
+	return 0;
+}
+
+static int text_matches_irq_thread(const char *text)
+{
+	return strstr(text, "irq/") != NULL &&
+		(strstr(text, GPIO_CONSUMER) != NULL ||
+		 strstr(text, "rockpi4") != NULL);
+}
+
+static int set_gpio_irq_priority(void)
+{
+	DIR *proc = opendir("/proc");
+	struct dirent *entry;
+	struct sched_param sp = { .sched_priority = GPIO_IRQ_RT_PRIORITY };
+
+	if (proc == NULL)
+		return -1;
+
+	while ((entry = readdir(proc)) != NULL) {
+		char *end = NULL;
+		long pid_long = strtol(entry->d_name, &end, 10);
+		int pid;
+		char text[512];
+
+		if (*entry->d_name == '\0' || *end != '\0' || pid_long <= 0)
+			continue;
+		pid = (int)pid_long;
+
+		if (read_proc_text(pid, "comm", text, sizeof(text)) == 0 &&
+		    text_matches_irq_thread(text)) {
+			closedir(proc);
+			return sched_setscheduler(pid, SCHED_FIFO, &sp);
+		}
+		if (read_proc_text(pid, "cmdline", text, sizeof(text)) == 0 &&
+		    text_matches_irq_thread(text)) {
+			closedir(proc);
+			return sched_setscheduler(pid, SCHED_FIFO, &sp);
+		}
+	}
+
+	closedir(proc);
+	return -1;
+}
+
+static void sleep_ms(int milliseconds)
+{
+	struct timespec req;
+
+	req.tv_sec = milliseconds / 1000;
+	req.tv_nsec = (long)(milliseconds % 1000) * 1000000L;
+	nanosleep(&req, NULL);
 }
 
 static void print_usage(const char *program)
@@ -192,7 +268,7 @@ static int setup_gpio(const struct options *opts, struct gpiod_chip **chip,
 	    out_cfg) < 0)
 		goto cleanup;
 
-	gpiod_request_config_set_consumer(req_cfg, "rockpi-raw-controller");
+	gpiod_request_config_set_consumer(req_cfg, GPIO_CONSUMER);
 	*request = gpiod_chip_request_lines(*chip, req_cfg, line_cfg);
 	if (*request == NULL)
 		goto cleanup;
@@ -200,6 +276,9 @@ static int setup_gpio(const struct options *opts, struct gpiod_chip **chip,
 	*evbuf = gpiod_edge_event_buffer_new(1);
 	if (*evbuf == NULL)
 		goto cleanup;
+
+	sleep_ms(100);
+	(void)set_gpio_irq_priority();
 
 	ret = 0;
 

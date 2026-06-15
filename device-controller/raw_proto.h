@@ -10,6 +10,8 @@
 #define RAW_MSG_RESPONSE 2
 #define RAW_STATUS_OK 0
 #define RAW_PAYLOAD_V2_SIZE 16
+#define RAW_ETH_PAYLOAD_PADDED_SIZE 1500
+#define RAW_ETH_FRAME_PADDED_SIZE (14 + RAW_ETH_PAYLOAD_PADDED_SIZE)
 
 static inline void raw_write_be16(unsigned char *ptr, uint16_t value)
 {

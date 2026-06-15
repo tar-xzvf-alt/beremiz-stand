@@ -279,6 +279,8 @@ ssh root@10.42.0.211 'pid=$(cat /root/beremiz-runtime/direct-raw-plc/beremiz_ser
 
 Ожидаемые RT threads после запуска PLC: один thread `FF 80` для raw receiver и один thread `FF 85` для PLC task.
 
+Текущий measurement profile использует padded raw Ethernet frames: один request frame и один response frame по `1514 bytes` каждый. Логика PLC с `sensor > threshold` не меняется; protocol v2 занимает первые `16` bytes payload, остальной payload заполнен нулями до `1500` bytes.
+
 ### 12.3. Собрать Controller Tool На RockPI
 
 Перенести исходники на RockPI через VisionFive:
@@ -312,7 +314,7 @@ scripts/run_controller_once_on_rockpi.sh root@10.42.0.211 root@10.43.0.2 /root/d
 Ожидаемый вывод:
 
 ```text
-sent request seq=4101 bytes=30 sensor=600 threshold=500 forced_output=0
+sent request seq=4101 bytes=1514 sensor=600 threshold=500 forced_output=0
 received response seq=4101 output=1 status=0
 ```
 
@@ -373,7 +375,15 @@ scripts/run_controller_gpio_loop_on_rockpi.sh root@10.42.0.211 root@10.43.0.2 /r
 ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller; ./controller-gpio-loop -i end0 --sequence 5301 --timeout-ms 1000 --count 1 & pid=\$!; sleep 1; ps -T -p \$pid -o pid,tid,cls,rtprio,comm; kill -TERM \$pid; wait \$pid 2>/dev/null || true"'
 ```
 
-Ожидаемый class/priority: `FF 80`.
+Ожидаемый class/priority для `controller-gpio-loop`: `FF 80`.
+
+GPIO IRQ thread должен получить priority `99` через consumer `rockpi4-monitor`. Проверка:
+
+```bash
+ssh root@10.42.0.211 'ssh root@10.43.0.2 "ps -eLo pid,tid,cls,rtprio,comm,args | grep \"[i]rq/.*rockpi4-monitor\""'
+```
+
+Ожидаемый class/priority для IRQ: `FF 99`.
 
 Полная functional проверка требует физический импульс на RockPI input line `6`.
 

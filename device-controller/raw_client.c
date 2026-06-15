@@ -71,9 +71,10 @@ int raw_client_send_request(struct raw_client *client,
 		0xff, 0xff, 0xff, 0xff, 0xff, 0xff
 	};
 	struct sockaddr_ll addr;
-	unsigned char frame[14 + RAW_PAYLOAD_V2_SIZE];
+	unsigned char frame[RAW_ETH_FRAME_PADDED_SIZE];
 	unsigned char *payload = frame + 14;
 
+	memset(frame, 0, sizeof(frame));
 	memcpy(frame, broadcast, ETH_ALEN);
 	memcpy(frame + ETH_ALEN, client->local_mac, ETH_ALEN);
 	raw_write_be16(frame + 12, RAW_ETHERTYPE);

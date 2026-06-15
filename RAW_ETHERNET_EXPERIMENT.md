@@ -252,6 +252,16 @@ Protocol v2 payload, network byte order:
 | `value1` | `u16` | `threshold` | `status` |
 | `value2` | `u16` | `forced_output` | reserved |
 
+Для measurement profile protocol v2 остается логически тем же, но каждый request/response отправляется padded frame размером `1514 bytes`:
+
+```text
+Ethernet header: 14 bytes
+Ethernet payload: 1500 bytes
+Protocol v2 fields: first 16 payload bytes
+Padding: zero bytes up to 1500-byte payload
+Frames per GPIO event: 1 request + 1 response
+```
+
 Ключевые файлы:
 
 ```text
@@ -288,6 +298,7 @@ direct-raw-plc task period: T#10ms
 VisionFive raw receiver thread: SCHED_FIFO priority 80
 VisionFive PLC task thread: SCHED_FIFO priority 85
 RockPI controller-gpio-loop: SCHED_FIFO priority 80
+RockPI GPIO IRQ thread: SCHED_FIFO priority 99
 per-cycle logging: disabled in controller-gpio-loop and VisionFive c_ext
 timeout behavior: leave RockPI output line 7 unchanged
 ```
@@ -295,7 +306,7 @@ timeout behavior: leave RockPI output line 7 unchanged
 Проверенный результат на RockPI:
 
 ```text
-sent request seq=4101 bytes=30 sensor=600 threshold=500 forced_output=0
+sent request seq=4101 bytes=1514 sensor=600 threshold=500 forced_output=0
 received response seq=4101 output=1 status=0
 ```
 

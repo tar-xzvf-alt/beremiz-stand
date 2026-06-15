@@ -233,8 +233,8 @@ RockPI end0 -> VisionFive end0 -> Beremiz direct-raw-plc -> response -> RockPI e
 Проверенный вывод на RockPI:
 
 ```text
-sent request seq=2003 bytes=30 sensor=600 threshold=500 forced_output=0
-received response seq=2003 output=1 status=0
+sent request seq=6101 bytes=1514 sensor=600 threshold=500 forced_output=0
+received response seq=6101 output=1 status=0
 ```
 
 Ранее runtime log на VisionFive показывал raw request/response строки:
@@ -253,9 +253,11 @@ GPIO controller собран на RockPI как отдельный target `make 
 RT profile для измерений:
 
 - RockPI `controller-gpio-loop`: `SCHED_FIFO`, priority `80`, `mlockall(MCL_CURRENT | MCL_FUTURE)`.
+- RockPI GPIO IRQ thread `irq/...-rockpi4-monitor`: `SCHED_FIFO`, priority `99`.
 - VisionFive raw receiver thread: `SCHED_FIFO`, priority `80`, `mlockall(...)`.
 - VisionFive PLC task thread: `SCHED_FIFO`, priority `85`, `mlockall(...)`.
 - `direct-raw-plc` task period: `T#10ms`.
+- Raw Ethernet request/response size: one padded Ethernet frame per direction, `1514 bytes` total (`14` byte Ethernet header + `1500` byte payload). Protocol v2 fields remain in the first `16` payload bytes; the rest is zero padding.
 - При send/timeout error `controller-gpio-loop` оставляет output line `7` без изменения, чтобы Arduino/rt-tester сам зафиксировал отсутствие ожидаемого edge.
 
 Не запускайте одновременно несколько RockPI controller programs на одном `end0`/EtherType `0x1122`: два raw socket consumers могут конкурировать за response frames. Проверки `controller-once`, `controller-loop` и `controller-gpio-loop` запускаются последовательно.

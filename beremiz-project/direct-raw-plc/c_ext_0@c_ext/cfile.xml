@@ -34,6 +34,7 @@
 #define RAW_V2_REQUEST 1
 #define RAW_V2_RESPONSE 2
 #define RAW_V2_STATUS_OK 0
+#define RAW_ETH_PAYLOAD_PADDED_SIZE 1500
 #define RAW_THREAD_RT_PRIORITY 80
 #define PLC_TASK_RT_PRIORITY 85
 
@@ -133,12 +134,13 @@ static void send_raw_response(uint32_t sequence, uint16_t output,
     uint16_t status, const unsigned char *dest_mac)
 {
     struct sockaddr_ll addr;
-    unsigned char frame[14 + RAW_V2_PAYLOAD_SIZE];
+    unsigned char frame[14 + RAW_ETH_PAYLOAD_PADDED_SIZE];
     unsigned char *payload = frame + 14;
 
     if (raw_socket_fd < 0 || raw_ifindex == 0)
         return;
 
+    memset(frame, 0, sizeof(frame));
     memcpy(frame, dest_mac, ETH_ALEN);
     memcpy(frame + ETH_ALEN, raw_local_mac, ETH_ALEN);
     write_be16(frame + 12, RAW_ETHERTYPE);

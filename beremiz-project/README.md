@@ -152,6 +152,7 @@ Measurement profile:
 - cycle task: `task0`, `T#10ms`;
 - raw receiver thread: `SCHED_FIFO`, priority `80`;
 - PLC task thread: `SCHED_FIFO`, priority `85`;
+- raw Ethernet request/response: one padded `1514` byte frame per direction, with protocol v2 in the first `16` payload bytes;
 - runtime raw request/response logging disabled with `#if 0` blocks in `c_ext_0@c_ext/cfile.xml`.
 
 Схема runtime:
@@ -225,6 +226,6 @@ scripts/deploy_controller_to_rockpi.sh
 scripts/build_controller_on_rockpi.sh
 ```
 
-Default GPIO mapping is `/dev/gpiochip4`, input line `6`, output line `7`. `controller-gpio-loop` uses `SCHED_FIFO` priority `80`, locks memory with `mlockall`, and has per-cycle logging disabled for measurement. On send/timeout error it leaves output line `7` unchanged.
+Default GPIO mapping is `/dev/gpiochip4`, input line `6`, output line `7`. `controller-gpio-loop` uses `SCHED_FIFO` priority `80`, locks memory with `mlockall`, sets the RockPI GPIO IRQ thread to `SCHED_FIFO` priority `99`, and has per-cycle logging disabled for measurement. On send/timeout error it leaves output line `7` unchanged.
 
 Use `scripts/run_controller_once_on_rockpi.sh`, `scripts/run_controller_loop_on_rockpi.sh`, and `scripts/run_controller_gpio_loop_on_rockpi.sh` sequentially. Do not run multiple raw controller programs on RockPI `end0` at the same time.
