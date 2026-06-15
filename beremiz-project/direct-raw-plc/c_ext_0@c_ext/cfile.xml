@@ -8,9 +8,11 @@
 #include <net/ethernet.h>
 #include <net/if.h>
 #include <pthread.h>
+#include <sched.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <sys/time.h>
@@ -32,6 +34,8 @@
 #define RAW_V2_REQUEST 1
 #define RAW_V2_RESPONSE 2
 #define RAW_V2_STATUS_OK 0
+#define RAW_THREAD_RT_PRIORITY 80
+#define PLC_TASK_RT_PRIORITY 85
 
 static pthread_t raw_thread;
 static pthread_mutex_t raw_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -49,8 +53,21 @@ static uint8_t raw_state_version = 0;
 static int raw_response_pending = 0;
 static unsigned char raw_response_mac[ETH_ALEN];
 
+#if 0
 static uint32_t raw_last_logged_sequence = 0;
 static uint16_t raw_last_logged_output = 0xffff;
+#endif
+static int raw_plc_rt_configured = 0;
+
+static void configure_current_thread_rt(int priority)
+{
+    struct sched_param sp;
+
+    memset(&sp, 0, sizeof(sp));
+    sp.sched_priority = priority;
+    (void)pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp);
+    (void)mlockall(MCL_CURRENT | MCL_FUTURE);
+}
 
 static uint16_t read_be16(const unsigned char *ptr)
 {
@@ -142,13 +159,19 @@ static void send_raw_response(uint32_t sequence, uint16_t output,
 
     if (sendto(raw_socket_fd, frame, sizeof(frame), 0,
         (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+#if 0
         printf("direct raw send response seq=%u failed: %s\n",
             sequence, strerror(errno));
+#endif
     } else {
+#if 0
         printf("direct raw send response seq=%u output=%u status=%u\n",
             sequence, output, status);
+#endif
     }
+#if 0
     fflush(stdout);
+#endif
 }
 
 static void *raw_receiver_main(void *unused)
@@ -159,11 +182,14 @@ static void *raw_receiver_main(void *unused)
     int fd;
 
     (void)unused;
+    configure_current_thread_rt(RAW_THREAD_RT_PRIORITY);
 
     fd = socket(AF_PACKET, SOCK_RAW, htons(RAW_ETHERTYPE));
     if (fd < 0) {
+#if 0
         printf("direct raw receiver socket failed: %s\n", strerror(errno));
         fflush(stdout);
+#endif
         return NULL;
     }
 
@@ -173,9 +199,11 @@ static void *raw_receiver_main(void *unused)
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
     if (load_interface_info(fd, raw_interface) < 0) {
+#if 0
         printf("direct raw receiver interface %s failed: %s\n", raw_interface,
             strerror(errno));
         fflush(stdout);
+#endif
         close(fd);
         raw_socket_fd = -1;
         return NULL;
@@ -186,17 +214,21 @@ static void *raw_receiver_main(void *unused)
     addr.sll_protocol = htons(RAW_ETHERTYPE);
     addr.sll_ifindex = raw_ifindex;
     if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+#if 0
         printf("direct raw receiver bind %s failed: %s\n", raw_interface,
             strerror(errno));
         fflush(stdout);
+#endif
         close(fd);
         raw_socket_fd = -1;
         return NULL;
     }
 
+#if 0
     printf("direct raw receiver listening on %s, EtherType=0x%04x\n",
         raw_interface, RAW_ETHERTYPE);
     fflush(stdout);
+#endif
 
     while (raw_running) {
         ssize_t length = recv(fd, frame, sizeof(frame), 0);
@@ -211,8 +243,10 @@ static void *raw_receiver_main(void *unused)
         if (length < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
                 continue;
+#if 0
             printf("direct raw receiver recv failed: %s\n", strerror(errno));
             fflush(stdout);
+#endif
             break;
         }
         if (length < 14 + RAW_V1_PAYLOAD_SIZE)
@@ -248,6 +282,7 @@ static void *raw_receiver_main(void *unused)
 
         store_raw_packet(sequence, sensor, threshold, forced_output, version,
             frame + ETH_ALEN);
+#if 0
         if (version == 2) {
             printf("direct raw recv request seq=%u sensor=%u threshold=%u forced_output=%u\n",
                 sequence, sensor, threshold, forced_output);
@@ -256,6 +291,7 @@ static void *raw_receiver_main(void *unused)
                 sequence, sensor, threshold, forced_output);
         }
         fflush(stdout);
+#endif
     }
 
     close(fd);
@@ -277,8 +313,10 @@ if (interface_name != NULL && interface_name[0] != '\0') {
 raw_running = 1;
 if (pthread_create(&raw_thread, NULL, raw_receiver_main, NULL) != 0) {
     raw_running = 0;
+#if 0
     printf("direct raw receiver thread failed: %s\n", strerror(errno));
     fflush(stdout);
+#endif
 }
 ]]></xhtml:p>
   </initFunction>
@@ -292,6 +330,10 @@ pthread_join(raw_thread, NULL);
   </cleanUpFunction>
   <retrieveFunction>
     <xhtml:p><![CDATA[
+if (!raw_plc_rt_configured) {
+    configure_current_thread_rt(PLC_TASK_RT_PRIORITY);
+    raw_plc_rt_configured = 1;
+}
 pthread_mutex_lock(&raw_lock);
 RawSensorValue = raw_state_sensor;
 RawThreshold = raw_state_threshold;
@@ -302,6 +344,7 @@ pthread_mutex_unlock(&raw_lock);
   </retrieveFunction>
   <publishFunction>
     <xhtml:p><![CDATA[
+#if 0
 if (RawSequence != raw_last_logged_sequence ||
     RawOutputCommand != raw_last_logged_output) {
     printf("direct raw plc seq=%u sensor=%u threshold=%u forced_output=%u output=%u\n",
@@ -311,6 +354,7 @@ if (RawSequence != raw_last_logged_sequence ||
     raw_last_logged_sequence = RawSequence;
     raw_last_logged_output = RawOutputCommand;
 }
+#endif
 
 {
     unsigned char dest_mac[ETH_ALEN];

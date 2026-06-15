@@ -281,6 +281,17 @@ ROCKPI_CONTROLLER_PLAN.md
 ./scripts/run_controller_once_on_rockpi.sh root@10.42.0.211 root@10.43.0.2 /root/device-controller end0 4101 600 500 0 2000
 ```
 
+Текущий measurement profile:
+
+```text
+direct-raw-plc task period: T#10ms
+VisionFive raw receiver thread: SCHED_FIFO priority 80
+VisionFive PLC task thread: SCHED_FIFO priority 85
+RockPI controller-gpio-loop: SCHED_FIFO priority 80
+per-cycle logging: disabled in controller-gpio-loop and VisionFive c_ext
+timeout behavior: leave RockPI output line 7 unchanged
+```
+
 Проверенный результат на RockPI:
 
 ```text
@@ -324,7 +335,9 @@ Smoke-test запуска без внешнего GPIO edge:
 ./scripts/run_controller_gpio_loop_on_rockpi.sh root@10.42.0.211 root@10.43.0.2 /root/device-controller end0 4301 1000 1 2
 ```
 
-Результат:
+Результат в quiet profile: команда завершается по remote timeout без штатного вывода и не оставляет `controller-gpio-loop` process.
+
+До quiet profile startup строка выглядела так:
 
 ```text
 controller-gpio-loop started iface=end0 gpio=/dev/gpiochip4 input=6 output=7

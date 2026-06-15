@@ -99,7 +99,7 @@ Modbus simulator хранит три holding registers:
 | `1` | `output_command` |
 | `2` | `threshold` |
 
-PLC каждые `100 ms` читает registers `0..2`, вычисляет alarm и пишет результат в register `1`:
+`study-plc` каждые `100 ms` читает Modbus registers `0..2`, вычисляет alarm и пишет результат в register `1`. `direct-raw-plc` использует ту же логику, но в измерительном профиле работает с period `T#10ms` и получает входы из raw Ethernet `c_ext`.
 
 ```iecst
 alarm := sensor_value > threshold;
@@ -237,7 +237,7 @@ sent request seq=2003 bytes=30 sensor=600 threshold=500 forced_output=0
 received response seq=2003 output=1 status=0
 ```
 
-Runtime log на VisionFive:
+Ранее runtime log на VisionFive показывал raw request/response строки:
 
 ```text
 direct raw receiver listening on end0, EtherType=0x1122
@@ -248,7 +248,15 @@ direct raw send response seq=2003 output=1 status=0
 
 Циклический RockPI loop без GPIO также проверен: 6 cycles с чередованием `sensor=400/600` вернули outputs `0,1,0,1,0,1`.
 
-GPIO controller собран на RockPI как отдельный target `make controller-gpio-loop`. Smoke-test запуска без внешнего импульса подтвердил захват `/dev/gpiochip4` lines `6/7` и cleanup; полный functional test требует физический edge на input line `6`.
+GPIO controller собран на RockPI как отдельный target `make controller-gpio-loop`. Измерительный path теперь quiet: штатный per-cycle logging в `controller-gpio-loop` и VisionFive `direct-raw-plc` `c_ext` отключен, чтобы не влиять на timing. Smoke-test запуска без внешнего импульса подтверждает захват `/dev/gpiochip4` lines `6/7` и cleanup отсутствием stale process; полный functional test требует физический edge на input line `6`.
+
+RT profile для измерений:
+
+- RockPI `controller-gpio-loop`: `SCHED_FIFO`, priority `80`, `mlockall(MCL_CURRENT | MCL_FUTURE)`.
+- VisionFive raw receiver thread: `SCHED_FIFO`, priority `80`, `mlockall(...)`.
+- VisionFive PLC task thread: `SCHED_FIFO`, priority `85`, `mlockall(...)`.
+- `direct-raw-plc` task period: `T#10ms`.
+- При send/timeout error `controller-gpio-loop` оставляет output line `7` без изменения, чтобы Arduino/rt-tester сам зафиксировал отсутствие ожидаемого edge.
 
 Не запускайте одновременно несколько RockPI controller programs на одном `end0`/EtherType `0x1122`: два raw socket consumers могут конкурировать за response frames. Проверки `controller-once`, `controller-loop` и `controller-gpio-loop` запускаются последовательно.
 

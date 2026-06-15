@@ -355,9 +355,19 @@ wait GPIO edge
 Требования:
 
 - timeout обязателен;
-- на timeout output должен перейти в safe state;
-- логировать latency по этапам: GPIO edge, Ethernet send, Ethernet receive, GPIO output;
+- на timeout/send error output line `7` остается без изменения, чтобы Arduino/rt-tester зафиксировал отсутствие ожидаемого edge;
+- для measurement profile per-cycle logging отключен;
 - не зависеть от ПК во время работы.
+
+RT measurement profile:
+
+```text
+direct-raw-plc task period: T#10ms
+VisionFive raw receiver thread: SCHED_FIFO priority 80
+VisionFive PLC task thread: SCHED_FIFO priority 85
+RockPI controller-gpio-loop: SCHED_FIFO priority 80
+mlockall(MCL_CURRENT | MCL_FUTURE): enabled on both devices
+```
 
 Build на RockPI:
 
@@ -379,7 +389,9 @@ Smoke-test запуска без внешнего импульса:
 scripts/run_controller_gpio_loop_on_rockpi.sh root@10.42.0.211 root@10.43.0.2 /root/device-controller end0 4301 1000 1 2
 ```
 
-Результат:
+Результат в quiet profile: команда завершается по remote timeout без штатного вывода и не оставляет `controller-gpio-loop` process.
+
+До quiet profile startup строка выглядела так:
 
 ```text
 controller-gpio-loop started iface=end0 gpio=/dev/gpiochip4 input=6 output=7

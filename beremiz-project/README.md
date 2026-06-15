@@ -147,6 +147,13 @@ The demo forces Modbus register `1` to the wrong value before each case, then wa
 
 `direct-raw-plc` использует ту же учебную логику `alarm := sensor_value > threshold`, но входы приходят не из Modbus, а из raw Ethernet receiver внутри Beremiz `c_ext`.
 
+Measurement profile:
+
+- cycle task: `task0`, `T#10ms`;
+- raw receiver thread: `SCHED_FIFO`, priority `80`;
+- PLC task thread: `SCHED_FIFO`, priority `85`;
+- runtime raw request/response logging disabled with `#if 0` blocks in `c_ext_0@c_ext/cfile.xml`.
+
 Схема runtime:
 
 ```text
@@ -218,6 +225,6 @@ scripts/deploy_controller_to_rockpi.sh
 scripts/build_controller_on_rockpi.sh
 ```
 
-Default GPIO mapping is `/dev/gpiochip4`, input line `6`, output line `7`. Smoke-test without an external edge starts successfully and waits for GPIO input; a full functional test requires a physical edge on line `6`.
+Default GPIO mapping is `/dev/gpiochip4`, input line `6`, output line `7`. `controller-gpio-loop` uses `SCHED_FIFO` priority `80`, locks memory with `mlockall`, and has per-cycle logging disabled for measurement. On send/timeout error it leaves output line `7` unchanged.
 
 Use `scripts/run_controller_once_on_rockpi.sh`, `scripts/run_controller_loop_on_rockpi.sh`, and `scripts/run_controller_gpio_loop_on_rockpi.sh` sequentially. Do not run multiple raw controller programs on RockPI `end0` at the same time.

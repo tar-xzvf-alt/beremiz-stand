@@ -269,11 +269,15 @@ scripts/deploy_run_direct_raw_on_visionfive_runtime.sh
 /usr/bin/python3 scripts/check_runtime_status.py ERPC://10.42.0.211:3000
 ```
 
-В runtime log должна быть строка:
+В measurement profile штатный raw Ethernet logging в runtime отключен. Поэтому после deploy проверяйте runtime status через ERPC, а не наличие строк `direct raw recv ...` в log.
 
-```text
-direct raw receiver listening on end0, EtherType=0x1122
+Для проверки RT priorities на VisionFive:
+
+```bash
+ssh root@10.42.0.211 'pid=$(cat /root/beremiz-runtime/direct-raw-plc/beremiz_service.pid); ps -T -p "$pid" -o pid,tid,cls,rtprio,comm'
 ```
+
+Ожидаемые RT threads после запуска PLC: один thread `FF 80` для raw receiver и один thread `FF 85` для PLC task.
 
 ### 12.3. Собрать Controller Tool На RockPI
 
@@ -318,13 +322,11 @@ received response seq=4101 output=1 status=0
 sensor=600 > threshold=500 -> PLC output_command=1
 ```
 
-Проверить логи VisionFive:
+В measurement profile VisionFive raw logs отключены. Проверяйте успешность exchange по выводу `controller-once` и status PLC.
 
-```bash
-ssh root@10.42.0.211 'tail -n 40 /root/beremiz-runtime/direct-raw-plc/beremiz_service.log'
-```
+Если нужно временно вернуть raw logs для диагностики, снимите `#if 0` вокруг `printf` blocks в `beremiz-project/direct-raw-plc/c_ext_0@c_ext/cfile.xml`.
 
-Ожидаемые строки:
+Старые диагностические строки до quiet profile выглядели так:
 
 ```text
 direct raw recv request seq=4101 sensor=600 threshold=500 forced_output=0
@@ -351,7 +353,7 @@ cycle=4 seq=4207 sensor=600 threshold=500 forced_output=0 output=1 status=0
 
 ### 12.6. Запустить GPIO Controller Loop
 
-`controller-gpio-loop` использует RockPI mapping из `rt-supervisor`: `/dev/gpiochip4`, input line `6`, output line `7`, оба edge. Rising edge отправляет HIGH sensor value, falling edge отправляет LOW sensor value. GPIO output устанавливается в `output` из PLC response; при timeout/error output переводится в safe state `0`.
+`controller-gpio-loop` использует RockPI mapping из `rt-supervisor`: `/dev/gpiochip4`, input line `6`, output line `7`, оба edge. Rising edge отправляет HIGH sensor value, falling edge отправляет LOW sensor value. GPIO output устанавливается в `output` из PLC response. При send/timeout error output line `7` не меняется, чтобы Arduino/rt-tester сам зафиксировал отсутствие ожидаемого edge.
 
 ```bash
 scripts/run_controller_gpio_loop_on_rockpi.sh
@@ -363,11 +365,15 @@ Smoke-test запуска без внешнего импульса:
 scripts/run_controller_gpio_loop_on_rockpi.sh root@10.42.0.211 root@10.43.0.2 /root/device-controller end0 4301 1000 1 2
 ```
 
-Ожидаемый вывод smoke-test:
+Ожидаемый результат smoke-test: команда штатно завершается по remote timeout, ничего не печатает и не оставляет `controller-gpio-loop` process на RockPI.
 
-```text
-controller-gpio-loop started iface=end0 gpio=/dev/gpiochip4 input=6 output=7
+Проверить RT priority RockPI controller можно так:
+
+```bash
+ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller; ./controller-gpio-loop -i end0 --sequence 5301 --timeout-ms 1000 --count 1 & pid=\$!; sleep 1; ps -T -p \$pid -o pid,tid,cls,rtprio,comm; kill -TERM \$pid; wait \$pid 2>/dev/null || true"'
 ```
+
+Ожидаемый class/priority: `FF 80`.
 
 Полная functional проверка требует физический импульс на RockPI input line `6`.
 
@@ -416,6 +422,8 @@ scripts/start_direct_raw_runtime_on_visionfive.sh root@10.42.0.211 end0
 ```
 
 Если в log видно `direct raw receiver listening on end1`, значит запущен старый runtime path для PC-side smoke-test.
+
+В measurement profile raw receiver startup строка отключена. Этот пункт относится к старому verbose profile; сейчас правильный interface задается командой `scripts/start_direct_raw_runtime_on_visionfive.sh root@10.42.0.211 end0`.
 
 ### RockPI Не Доступен По SSH
 

@@ -5,13 +5,18 @@
 
 #include <errno.h>
 #include <gpiod.h>
+#include <pthread.h>
+#include <sched.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
+
+#define CONTROLLER_RT_PRIORITY 80
 
 struct options {
 	const char *interface;
@@ -32,6 +37,14 @@ static void handle_signal(int signal_number)
 {
 	(void)signal_number;
 	running = 0;
+}
+
+static void configure_realtime(void)
+{
+	struct sched_param sp = { .sched_priority = CONTROLLER_RT_PRIORITY };
+
+	(void)pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp);
+	(void)mlockall(MCL_CURRENT | MCL_FUTURE);
 }
 
 static void print_usage(const char *program)
@@ -145,12 +158,6 @@ static int parse_options(int argc, char **argv, struct options *opts)
 	return 0;
 }
 
-static long elapsed_us(const struct timespec *start, const struct timespec *end)
-{
-	return (end->tv_sec - start->tv_sec) * 1000000L +
-		(end->tv_nsec - start->tv_nsec) / 1000L;
-}
-
 static int setup_gpio(const struct options *opts, struct gpiod_chip **chip,
 	struct gpiod_line_request **request, struct gpiod_edge_event_buffer **evbuf)
 {
@@ -237,6 +244,7 @@ int main(int argc, char **argv)
 
 	signal(SIGINT, handle_signal);
 	signal(SIGTERM, handle_signal);
+	configure_realtime();
 
 	if (setup_gpio(&opts, &chip, &gpio_request, &evbuf) < 0) {
 		fprintf(stderr, "failed to setup GPIO %s input=%u output=%u: %s\n",
@@ -255,16 +263,17 @@ int main(int argc, char **argv)
 	}
 
 	sequence = opts.sequence;
+/*
 	printf("controller-gpio-loop started iface=%s gpio=%s input=%u output=%u\n",
 		opts.interface, opts.gpio_chip, opts.gpio_input, opts.gpio_output);
 	fflush(stdout);
+*/
 
 	while (running && (opts.count == 0 || cycle < opts.count)) {
 		struct gpiod_edge_event *event;
 		enum gpiod_edge_event_type event_type;
 		struct raw_request request;
 		struct raw_response response;
-		struct timespec t_edge, t_sent, t_recv, t_done;
 		const char *edge_name;
 		int sent;
 		int output_value;
@@ -285,7 +294,6 @@ int main(int argc, char **argv)
 		if (event == NULL)
 			continue;
 
-		clock_gettime(CLOCK_MONOTONIC, &t_edge);
 		event_type = gpiod_edge_event_get_event_type(event);
 		edge_name = event_type == GPIOD_EDGE_EVENT_RISING_EDGE ?
 			"RISE" : "FALL";
@@ -301,11 +309,9 @@ int main(int argc, char **argv)
 		}
 
 		sent = raw_client_send_request(&client, &request);
-		clock_gettime(CLOCK_MONOTONIC, &t_sent);
 		if (sent < 0) {
 			fprintf(stderr, "cycle=%d seq=%u edge=%s send failed: %s\n",
 				cycle + 1, request.sequence, edge_name, strerror(errno));
-			gpiod_line_request_set_value(gpio_request, opts.gpio_output, 0);
 			failures++;
 			continue;
 		}
@@ -314,11 +320,9 @@ int main(int argc, char **argv)
 		    &response) < 0) {
 			fprintf(stderr, "cycle=%d seq=%u edge=%s response timeout: %s\n",
 				cycle + 1, request.sequence, edge_name, strerror(errno));
-			gpiod_line_request_set_value(gpio_request, opts.gpio_output, 0);
 			failures++;
 			continue;
 		}
-		clock_gettime(CLOCK_MONOTONIC, &t_recv);
 
 		output_value = response.status == RAW_STATUS_OK && response.output != 0;
 		if (gpiod_line_request_set_value(gpio_request, opts.gpio_output,
@@ -327,15 +331,16 @@ int main(int argc, char **argv)
 				cycle + 1, request.sequence, strerror(errno));
 			failures++;
 		}
-		clock_gettime(CLOCK_MONOTONIC, &t_done);
 
 		cycle++;
+		/*
 		printf("cycle=%d seq=%u edge=%s sensor=%u threshold=%u forced_output=%u output=%u status=%u gpio_out=%d net_us=%ld total_us=%ld\n",
 			cycle, request.sequence, edge_name, request.sensor,
 			request.threshold, request.forced_output, response.output,
 			response.status, output_value, elapsed_us(&t_sent, &t_recv),
 			elapsed_us(&t_edge, &t_done));
 		fflush(stdout);
+		*/
 
 		if (response.status != RAW_STATUS_OK)
 			failures++;
