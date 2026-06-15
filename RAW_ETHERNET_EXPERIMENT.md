@@ -256,6 +256,7 @@ Protocol v2 payload, network byte order:
 
 ```text
 device-controller/controller-once.c
+device-controller/controller-loop.c
 device-controller/raw_proto.h
 scripts/configure_rockpi_link_on_visionfive.sh
 scripts/start_direct_raw_runtime_on_visionfive.sh
@@ -288,4 +289,21 @@ direct raw plc seq=2003 sensor=600 threshold=500 forced_output=0 output=1
 direct raw send response seq=2003 output=1 status=0
 ```
 
-Следующий практический этап: `controller-loop` на RockPI без GPIO, затем GPIO edge -> request -> response -> GPIO output.
+Проверенный `controller-loop` без GPIO:
+
+```bash
+ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller && ./controller-loop -i end0 --sequence 3000 --count 6 --period-ms 200 --timeout-ms 2000"'
+```
+
+Результат:
+
+```text
+cycle=1 seq=3000 sensor=400 threshold=500 forced_output=1 output=0 status=0
+cycle=2 seq=3001 sensor=600 threshold=500 forced_output=0 output=1 status=0
+cycle=3 seq=3002 sensor=400 threshold=500 forced_output=1 output=0 status=0
+cycle=4 seq=3003 sensor=600 threshold=500 forced_output=0 output=1 status=0
+cycle=5 seq=3004 sensor=400 threshold=500 forced_output=1 output=0 status=0
+cycle=6 seq=3005 sensor=600 threshold=500 forced_output=0 output=1 status=0
+```
+
+Следующий практический этап: GPIO edge -> request -> response -> GPIO output.

@@ -151,7 +151,7 @@ The demo forces Modbus register `1` to the wrong value before each case, then wa
 
 ```text
 RockPI end0
-  controller-once / future controller-loop
+  controller-once / controller-loop / future GPIO controller
   raw Ethernet v2 request
         |
         v
@@ -202,3 +202,11 @@ Expected response:
 ```text
 received response seq=2003 output=1 status=0
 ```
+
+Verified RockPI loop without GPIO:
+
+```bash
+ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller && ./controller-loop -i end0 --sequence 3000 --count 6 --period-ms 200 --timeout-ms 2000"'
+```
+
+Expected alternating outputs: `0, 1, 0, 1, 0, 1`.

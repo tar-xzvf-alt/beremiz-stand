@@ -324,6 +324,25 @@ direct raw plc seq=2003 sensor=600 threshold=500 forced_output=0 output=1
 direct raw send response seq=2003 output=1 status=0
 ```
 
+### 12.5. Проверить Controller Loop Без GPIO
+
+`controller-loop` отправляет requests по таймеру, чередуя LOW/HIGH значения датчика. Это проверяет устойчивость Ethernet request/response до подключения GPIO.
+
+```bash
+ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller && ./controller-loop -i end0 --sequence 3000 --count 6 --period-ms 200 --timeout-ms 2000"'
+```
+
+Ожидаемый вывод:
+
+```text
+cycle=1 seq=3000 sensor=400 threshold=500 forced_output=1 output=0 status=0
+cycle=2 seq=3001 sensor=600 threshold=500 forced_output=0 output=1 status=0
+cycle=3 seq=3002 sensor=400 threshold=500 forced_output=1 output=0 status=0
+cycle=4 seq=3003 sensor=600 threshold=500 forced_output=0 output=1 status=0
+cycle=5 seq=3004 sensor=400 threshold=500 forced_output=1 output=0 status=0
+cycle=6 seq=3005 sensor=600 threshold=500 forced_output=0 output=1 status=0
+```
+
 ## 13. Частые Проблемы
 
 ### Simulator Не Отвечает

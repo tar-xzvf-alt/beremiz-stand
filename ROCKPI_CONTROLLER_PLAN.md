@@ -280,10 +280,10 @@ scripts/deploy_controller_to_rockpi.sh
 
 ### Этап 4. Controller Loop Без GPIO
 
-Добавить режим, который отправляет requests в цикле по таймеру или stdin:
+Добавлен режим, который отправляет requests в цикле по таймеру:
 
 ```bash
-./controller-loop -i eth0 --period-ms 1000
+./controller-loop -i end0 --period-ms 1000
 ```
 
 Цель:
@@ -292,6 +292,25 @@ scripts/deploy_controller_to_rockpi.sh
 - проверить sequence handling;
 - проверить timeout и reconnect behavior;
 - убедиться, что ПК не участвует в control loop.
+
+Проверенный запуск на RockPI:
+
+```bash
+ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller && ./controller-loop -i end0 --sequence 3000 --count 6 --period-ms 200 --timeout-ms 2000"'
+```
+
+Результат:
+
+```text
+cycle=1 seq=3000 sensor=400 threshold=500 forced_output=1 output=0 status=0
+cycle=2 seq=3001 sensor=600 threshold=500 forced_output=0 output=1 status=0
+cycle=3 seq=3002 sensor=400 threshold=500 forced_output=1 output=0 status=0
+cycle=4 seq=3003 sensor=600 threshold=500 forced_output=0 output=1 status=0
+cycle=5 seq=3004 sensor=400 threshold=500 forced_output=1 output=0 status=0
+cycle=6 seq=3005 sensor=600 threshold=500 forced_output=0 output=1 status=0
+```
+
+Это завершает сетевой cyclic этап без GPIO. Следующий этап: заменить timer-driven cycle на GPIO edge-driven cycle.
 
 ### Этап 5. GPIO Loop На RockPI
 
