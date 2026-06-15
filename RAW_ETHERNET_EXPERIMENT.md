@@ -155,6 +155,7 @@ beremiz-project/direct-raw-plc/                 # отдельный direct raw 
 beremiz-project/direct-raw-plc/c_ext_0@c_ext/   # C extension с raw receiver thread
 scripts/build_direct_raw_on_visionfive.sh
 scripts/deploy_run_direct_raw_on_visionfive_runtime.sh
+scripts/demo_direct_raw_ethernet.py
 ```
 
 Подготовка и запуск direct raw project:
@@ -189,3 +190,20 @@ direct raw plc seq=3 sensor=250 threshold=500 forced_output=1 output=0
 ```
 
 Это подтверждает прямую цепочку `raw Ethernet -> Beremiz runtime c_ext -> PLC logic` без промежуточного Modbus слоя.
+
+Автоматическая проверка direct raw path:
+
+```bash
+sudo /usr/bin/python3 scripts/demo_direct_raw_ethernet.py --interface enp2s0
+```
+
+Скрипт отправляет три raw Ethernet packets, читает runtime log на VisionFive 2 через SSH и проверяет, что PLC output стал `0`, `1`, `0`.
+
+Успешный результат:
+
+```text
+LOW: sent=29 sequence=1781465089 sensor=400 threshold=500 forced_output=1 output=0
+HIGH: sent=29 sequence=1781465090 sensor=600 threshold=500 forced_output=0 output=1
+LOW-AGAIN: sent=29 sequence=1781465091 sensor=250 threshold=500 forced_output=1 output=0
+direct raw Ethernet demo passed
+```
