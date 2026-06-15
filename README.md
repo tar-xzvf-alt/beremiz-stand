@@ -67,6 +67,7 @@ RockPI end0, 10.43.0.2/24
 | `beremiz-project/direct-raw-plc/` | Beremiz PLC project с raw Ethernet `c_ext` без Modbus |
 | `device-controller/controller-once.c` | RockPI-side одиночный raw Ethernet request/response tool |
 | `device-controller/controller-loop.c` | RockPI-side циклический request/response tool без GPIO |
+| `device-controller/controller-gpio-loop.c` | RockPI-side GPIO edge -> raw request -> GPIO output loop |
 | `modbus-simulator/modbus_server.py` | Modbus TCP simulator на стандартной библиотеке Python |
 | `modbus-simulator/modbus_client.py` | Утилита чтения/записи Modbus registers |
 | `scripts/sync_to_visionfive.sh` | Передача репозитория на VisionFive 2 через `scp` |
@@ -241,6 +242,8 @@ direct raw send response seq=2003 output=1 status=0
 ```
 
 Циклический RockPI loop без GPIO также проверен: 6 cycles с чередованием `sensor=400/600` вернули outputs `0,1,0,1,0,1`.
+
+GPIO controller собран на RockPI как отдельный target `make controller-gpio-loop`. Smoke-test запуска без внешнего импульса подтвердил захват `/dev/gpiochip4` lines `6/7` и cleanup; полный functional test требует физический edge на input line `6`.
 
 ## Быстрый Старт
 

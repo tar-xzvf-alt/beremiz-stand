@@ -257,6 +257,7 @@ Protocol v2 payload, network byte order:
 ```text
 device-controller/controller-once.c
 device-controller/controller-loop.c
+device-controller/controller-gpio-loop.c
 device-controller/raw_proto.h
 scripts/configure_rockpi_link_on_visionfive.sh
 scripts/start_direct_raw_runtime_on_visionfive.sh
@@ -306,4 +307,22 @@ cycle=5 seq=3004 sensor=400 threshold=500 forced_output=1 output=0 status=0
 cycle=6 seq=3005 sensor=600 threshold=500 forced_output=0 output=1 status=0
 ```
 
-Следующий практический этап: GPIO edge -> request -> response -> GPIO output.
+GPIO target на RockPI:
+
+```bash
+ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller && make controller-gpio-loop"'
+```
+
+Smoke-test запуска без внешнего GPIO edge:
+
+```bash
+ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller && timeout 2s ./controller-gpio-loop -i end0 --sequence 4000 --count 1 --timeout-ms 1000"'
+```
+
+Результат:
+
+```text
+controller-gpio-loop started iface=end0 gpio=/dev/gpiochip4 input=6 output=7
+```
+
+Следующий практический этап: физический GPIO edge на RockPI line `6` и проверка изменения output line `7`.

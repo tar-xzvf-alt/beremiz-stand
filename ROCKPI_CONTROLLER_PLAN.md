@@ -10,6 +10,8 @@
 - Beremiz `c_ext` внутри runtime принимает raw Ethernet frames с EtherType `0x1122`.
 - PLC получает значения напрямую через external variables, без Modbus simulator.
 - `device-controller/controller-once` проверяет цепочку `RockPI end0 -> VisionFive end0 -> Beremiz PLC -> raw Ethernet response -> RockPI end0`.
+- `device-controller/controller-loop` проверяет cyclic request/response без GPIO.
+- `device-controller/controller-gpio-loop` добавлен для GPIO edge-driven цикла на RockPI.
 - `scripts/demo_direct_raw_ethernet.py` оставлен как PC-side smoke-test direct raw path без RockPI.
 
 ПК уже убран из raw Ethernet control loop: он используется для SSH/ERPC/monitoring через VisionFive `end1`.
@@ -323,13 +325,21 @@ GPIO_LINE_OUT 7
 GPIO_EDGE     both
 ```
 
+Добавлен `controller-gpio-loop`. Default mapping:
+
+```text
+/dev/gpiochip4 input=6 output=7
+```
+
 Цикл:
 
 ```text
 wait GPIO edge
+  -> rising edge: sensor=600, forced_output=0
+  -> falling edge: sensor=400, forced_output=1
   -> send raw request seq=N
   -> wait raw response seq=N
-  -> set/toggle GPIO output from response output_command
+  -> set GPIO output to response output_command
 ```
 
 Требования:
@@ -338,6 +348,34 @@ wait GPIO edge
 - на timeout output должен перейти в safe state;
 - логировать latency по этапам: GPIO edge, Ethernet send, Ethernet receive, GPIO output;
 - не зависеть от ПК во время работы.
+
+Build на RockPI:
+
+```bash
+ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller && make controller-gpio-loop"'
+```
+
+Проверено на RockPI:
+
+```text
+libgpiod: 2.2.4
+gpiochip4 lines 6/7: free before run
+make controller-gpio-loop: success
+```
+
+Smoke-test запуска без внешнего импульса:
+
+```bash
+ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller && timeout 2s ./controller-gpio-loop -i end0 --sequence 4000 --count 1 --timeout-ms 1000"'
+```
+
+Результат:
+
+```text
+controller-gpio-loop started iface=end0 gpio=/dev/gpiochip4 input=6 output=7
+```
+
+Functional test не завершен: нужен физический edge на RockPI input line `6`.
 
 ### Этап 6. Monitoring / Demo
 
@@ -393,18 +431,13 @@ Beremiz runtime c_ext
 
 Перед deploy на RockPI нужно уточнить:
 
-- SSH адрес и пользователь RockPI;
-- имя Ethernet interface RockPI;
-- нужна ли IP-сеть на линке `VisionFive end0 <-> RockPI` для SSH/diagnostics;
-- установлен ли compiler на RockPI;
-- версия libgpiod на RockPI;
 - точная электрическая схема GPIO input/output;
-- output должен держать состояние `0/1` или делать короткий pulse.
+- нужна ли инверсия polarity для конкретной проводки.
 
 ## Ближайший Следующий Шаг
 
-После commit этого документа следующий кодовый шаг:
+После `controller-gpio-loop` следующий практический шаг:
 
 ```text
-Implement protocol v2 request/response in VisionFive direct-raw-plc and add a controller-once raw Ethernet tool.
+Подать физический edge на RockPI input line 6 и проверить, что output line 7 повторяет PLC response output.
 ```

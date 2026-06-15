@@ -151,7 +151,7 @@ The demo forces Modbus register `1` to the wrong value before each case, then wa
 
 ```text
 RockPI end0
-  controller-once / controller-loop / future GPIO controller
+  controller-once / controller-loop / controller-gpio-loop
   raw Ethernet v2 request
         |
         v
@@ -210,3 +210,11 @@ ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller && ./contro
 ```
 
 Expected alternating outputs: `0, 1, 0, 1, 0, 1`.
+
+GPIO controller target on RockPI:
+
+```bash
+ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller && make controller-gpio-loop"'
+```
+
+Default GPIO mapping is `/dev/gpiochip4`, input line `6`, output line `7`. Smoke-test without an external edge starts successfully and waits for GPIO input; a full functional test requires a physical edge on line `6`.

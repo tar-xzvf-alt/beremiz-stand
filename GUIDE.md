@@ -289,6 +289,12 @@ ssh root@10.42.0.211 'scp -r /root/beremiz-stand/device-controller root@10.43.0.
 ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller && make clean && make"'
 ```
 
+GPIO controller требует libgpiod v2 и собирается отдельным target:
+
+```bash
+ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller && make controller-gpio-loop"'
+```
+
 ### 12.4. Проверить Once Exchange
 
 Запустить одиночный request/response с RockPI:
@@ -342,6 +348,28 @@ cycle=4 seq=3003 sensor=600 threshold=500 forced_output=0 output=1 status=0
 cycle=5 seq=3004 sensor=400 threshold=500 forced_output=1 output=0 status=0
 cycle=6 seq=3005 sensor=600 threshold=500 forced_output=0 output=1 status=0
 ```
+
+### 12.6. Запустить GPIO Controller Loop
+
+`controller-gpio-loop` использует RockPI mapping из `rt-supervisor`: `/dev/gpiochip4`, input line `6`, output line `7`, оба edge. Rising edge отправляет HIGH sensor value, falling edge отправляет LOW sensor value. GPIO output устанавливается в `output` из PLC response; при timeout/error output переводится в safe state `0`.
+
+```bash
+ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller && ./controller-gpio-loop -i end0 --sequence 4000 --timeout-ms 1000"'
+```
+
+Smoke-test запуска без внешнего импульса:
+
+```bash
+ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller && timeout 2s ./controller-gpio-loop -i end0 --sequence 4000 --count 1 --timeout-ms 1000"'
+```
+
+Ожидаемый вывод smoke-test:
+
+```text
+controller-gpio-loop started iface=end0 gpio=/dev/gpiochip4 input=6 output=7
+```
+
+Полная functional проверка требует физический импульс на RockPI input line `6`.
 
 ## 13. Частые Проблемы
 
