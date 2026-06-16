@@ -1,0 +1,225 @@
+<?xml version='1.0' encoding='utf-8'?>
+<CFile xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <includes>
+    <xhtml:p><![CDATA[
+#include <errno.h>
+#include <fcntl.h>
+#include <linux/futex.h>
+#include <pthread.h>
+#include <sched.h>
+#include <stdatomic.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+]]></xhtml:p>
+  </includes>
+  <variables>
+    <variable name="RawSensorValue" type="UINT" initial="0"/>
+    <variable name="RawThreshold" type="UINT" initial="500"/>
+    <variable name="RawForcedOutput" type="UINT" initial="0"/>
+    <variable name="RawSequence" type="UDINT" initial="0"/>
+    <variable name="RawOutputCommand" type="UINT" initial="0"/>
+  </variables>
+  <globals>
+    <xhtml:p><![CDATA[
+#define SUPV_INPUT_SIZE (96 * 1024)
+#define SUPV_SHMEM_INPUT "shmem_input"
+#define SUPV_SHMEM_OUTPUT "shmem_output"
+#define RAW_V2_PAYLOAD_SIZE 16
+#define RAW_V2_REQUEST 1
+#define RAW_V2_RESPONSE 2
+#define RAW_V2_STATUS_OK 0
+#define PLC_TASK_RT_PRIORITY 85
+
+struct slot_t {
+    volatile atomic_uint_fast32_t sequence;
+    volatile uint8_t data[SUPV_INPUT_SIZE];
+};
+
+static int input_fd = -1;
+static int output_fd = -1;
+static struct slot_t *input_slot = NULL;
+static struct slot_t *output_slot = NULL;
+static uint32_t last_input_sequence = 0;
+static uint32_t output_sequence = 0;
+static uint32_t pending_response_sequence = 0;
+static int response_pending = 0;
+static int shm_ready = 0;
+static int plc_rt_configured = 0;
+
+static uint16_t read_be16(const volatile uint8_t *ptr)
+{
+    return ((uint16_t)ptr[0] << 8) | ptr[1];
+}
+
+static uint32_t read_be32(const volatile uint8_t *ptr)
+{
+    return ((uint32_t)ptr[0] << 24) | ((uint32_t)ptr[1] << 16) |
+        ((uint32_t)ptr[2] << 8) | ptr[3];
+}
+
+static void write_be16(volatile uint8_t *ptr, uint16_t value)
+{
+    ptr[0] = (uint8_t)(value >> 8);
+    ptr[1] = (uint8_t)value;
+}
+
+static void write_be32(volatile uint8_t *ptr, uint32_t value)
+{
+    ptr[0] = (uint8_t)(value >> 24);
+    ptr[1] = (uint8_t)(value >> 16);
+    ptr[2] = (uint8_t)(value >> 8);
+    ptr[3] = (uint8_t)value;
+}
+
+static void configure_current_thread_rt(int priority)
+{
+    struct sched_param sp;
+
+    memset(&sp, 0, sizeof(sp));
+    sp.sched_priority = priority;
+    (void)pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp);
+    (void)mlockall(MCL_CURRENT | MCL_FUTURE);
+}
+
+static int map_supervisor_slots(void)
+{
+    if (shm_ready)
+        return 0;
+
+    input_fd = shm_open(SUPV_SHMEM_INPUT, O_RDWR, 0);
+    if (input_fd < 0)
+        return -1;
+    output_fd = shm_open(SUPV_SHMEM_OUTPUT, O_RDWR, 0);
+    if (output_fd < 0)
+        return -1;
+
+    input_slot = (struct slot_t *)mmap(NULL, sizeof(struct slot_t),
+        PROT_READ | PROT_WRITE, MAP_SHARED, input_fd, 0);
+    if (input_slot == MAP_FAILED) {
+        input_slot = NULL;
+        return -1;
+    }
+    output_slot = (struct slot_t *)mmap(NULL, sizeof(struct slot_t),
+        PROT_READ | PROT_WRITE, MAP_SHARED, output_fd, 0);
+    if (output_slot == MAP_FAILED) {
+        output_slot = NULL;
+        return -1;
+    }
+
+    last_input_sequence = atomic_load_explicit(&input_slot->sequence,
+        memory_order_acquire);
+    output_sequence = atomic_load_explicit(&output_slot->sequence,
+        memory_order_acquire);
+    memset((void *)output_slot->data, 0, SUPV_INPUT_SIZE);
+    shm_ready = 1;
+    return 0;
+}
+
+static int parse_request(const volatile uint8_t *payload)
+{
+    uint32_t sequence;
+    uint16_t sensor;
+    uint16_t threshold;
+    uint16_t forced_output;
+
+    if (payload[0] != 'B' || payload[1] != 'E' || payload[2] != 'T' ||
+        payload[3] != 'H')
+        return -1;
+    if (payload[4] != 2 || payload[5] != RAW_V2_REQUEST)
+        return -1;
+
+    sequence = read_be32(payload + 6);
+    sensor = read_be16(payload + 10);
+    threshold = read_be16(payload + 12);
+    forced_output = read_be16(payload + 14);
+    if (forced_output > 1)
+        return -1;
+
+    RawSequence = sequence;
+    RawSensorValue = sensor;
+    RawThreshold = threshold;
+    RawForcedOutput = forced_output;
+    pending_response_sequence = sequence;
+    response_pending = 1;
+    return 0;
+}
+
+static void write_response(void)
+{
+    volatile uint8_t *payload;
+
+    if (!shm_ready || output_slot == NULL || !response_pending)
+        return;
+
+    payload = output_slot->data;
+    memset((void *)output_slot->data, 0, RAW_V2_PAYLOAD_SIZE);
+    payload[0] = 'B';
+    payload[1] = 'E';
+    payload[2] = 'T';
+    payload[3] = 'H';
+    payload[4] = 2;
+    payload[5] = RAW_V2_RESPONSE;
+    write_be32(payload + 6, pending_response_sequence);
+    write_be16(payload + 10, (uint16_t)RawOutputCommand);
+    write_be16(payload + 12, RAW_V2_STATUS_OK);
+    write_be16(payload + 14, 0);
+
+    atomic_store_explicit(&output_slot->sequence, ++output_sequence,
+        memory_order_release);
+    syscall(SYS_futex, &output_slot->sequence, FUTEX_WAKE, 2147483647,
+        NULL, NULL, 0);
+    response_pending = 0;
+}
+]]></xhtml:p>
+  </globals>
+  <initFunction>
+    <xhtml:p><![CDATA[
+map_supervisor_slots();
+]]></xhtml:p>
+  </initFunction>
+  <cleanUpFunction>
+    <xhtml:p><![CDATA[
+if (input_slot != NULL)
+    munmap(input_slot, sizeof(struct slot_t));
+if (output_slot != NULL)
+    munmap(output_slot, sizeof(struct slot_t));
+if (input_fd >= 0)
+    close(input_fd);
+if (output_fd >= 0)
+    close(output_fd);
+input_slot = NULL;
+output_slot = NULL;
+input_fd = -1;
+output_fd = -1;
+shm_ready = 0;
+]]></xhtml:p>
+  </cleanUpFunction>
+  <retrieveFunction>
+    <xhtml:p><![CDATA[
+uint32_t input_sequence;
+
+if (!plc_rt_configured) {
+    configure_current_thread_rt(PLC_TASK_RT_PRIORITY);
+    plc_rt_configured = 1;
+}
+if (map_supervisor_slots() == 0) {
+    input_sequence = atomic_load_explicit(&input_slot->sequence,
+        memory_order_acquire);
+    if (input_sequence != last_input_sequence) {
+        last_input_sequence = input_sequence;
+        parse_request(input_slot->data);
+    }
+}
+]]></xhtml:p>
+  </retrieveFunction>
+  <publishFunction>
+    <xhtml:p><![CDATA[
+write_response();
+]]></xhtml:p>
+  </publishFunction>
+</CFile>

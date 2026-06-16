@@ -4,7 +4,7 @@
 
 Цель: проверить сценарий, где внешнее устройство отправляет raw Ethernet packet на VisionFive 2, а PLC-логика Beremiz реагирует на полученные данные.
 
-Текущий результат ветки: raw Ethernet packets отправляет отдельный RockPI по своему `end0` в VisionFive `end0`; Beremiz runtime на VisionFive принимает request внутри `c_ext`, PLC вычисляет `output_command`, а VisionFive отправляет raw Ethernet response обратно на RockPI. ПК остается engineering/monitoring station на VisionFive `end1`.
+Текущий результат ветки: raw Ethernet packets отправляет отдельный RockPI по своему `end0` в VisionFive `end0`; Beremiz runtime на VisionFive принимает request внутри `c_ext`, PLC вычисляет `output_command`, а VisionFive отправляет raw Ethernet response обратно на RockPI. Следующий supervised вариант переносит raw Ethernet transport в штатный `rt-supervisor`, а Beremiz runtime общается с ним через `/dev/shm` + futex. ПК остается engineering/monitoring station на VisionFive `end1`.
 
 ```text
 ПК <-> VisionFive end1
@@ -357,3 +357,74 @@ controller-gpio-loop started iface=end0 gpio=/dev/gpiochip4 input=6 output=7
 Следующий практический этап: физический GPIO edge на RockPI line `6` и проверка изменения output line `7`.
 
 Ограничение проверки: raw controller tools нельзя запускать параллельно на одном RockPI `end0`, иначе они могут конкурировать за response frames одного EtherType `0x1122`.
+
+## Supervised Raw Ethernet Runtime Variant
+
+После direct raw measurement profile выбран вариант максимального переиспользования `rt-supervisor` как есть.
+
+Схема:
+
+```text
+RockPI rt-supervisor/controller-emu
+  GPIO edge
+  controller_msg_t.payload[0..15] = BETH v2 request
+        |
+        v
+VisionFive alt-rt-supervisor
+  raw Ethernet fragmentation/reassembly, CRC
+  /dev/shm/shmem_input + futex wake
+        |
+        v
+Beremiz runtime supervised-raw-plc
+  c_ext __retrieve reads shmem request
+  PLC computes output_command
+  c_ext __publish writes BETH v2 response to /dev/shm/shmem_output
+        |
+        v
+alt-rt-supervisor sends 96 KiB logical response
+        |
+        v
+RockPI controller-emu sets GPIO output
+```
+
+Отличия от direct raw variant:
+
+| Property | Direct raw | Supervised raw |
+| --- | --- | --- |
+| VisionFive raw socket owner | Beremiz `c_ext` | `alt-rt-supervisor` |
+| Beremiz I/O path | raw socket inside runtime | `/dev/shm` + futex |
+| Ethernet payload profile | one padded 1514-byte frame per direction | existing `rt-supervisor` 96 KiB logical message with fragmentation |
+| Runtime supervision | standalone Beremiz runtime | `alt-rt-supervisor -r start_runtime.sh` |
+| Protocol fields | first 16 payload bytes | first 16 bytes of 96 KiB logical payload |
+
+Ключевые файлы:
+
+```text
+beremiz-project/supervised-raw-plc/
+scripts/build_supervised_raw_on_visionfive.sh
+scripts/deploy_run_supervised_raw_on_visionfive_runtime.sh
+scripts/install_supervised_runtime_wrapper_on_visionfive.sh
+```
+
+Проверенный smoke-test wrapper/supervisor startup на VisionFive:
+
+```bash
+timeout 5s /root/rt-supervisor/Build/src/alt-rt-supervisor -i end0 -t 500000 -r /root/beremiz-runtime/supervised-raw-plc/start_runtime.sh
+```
+
+Ожидаемый `timeout` status: `124`. При запуске создаются shared memory slots:
+
+```text
+/dev/shm/shmem_input   size 98312
+/dev/shm/shmem_output  size 98312
+```
+
+Runtime log показывает startup Beremiz service:
+
+```text
+Beremiz_service:  1.4
+eRPC port : 3000
+Current working directory :.
+```
+
+Оставшаяся functional проверка: одновременно запустить `alt-rt-supervisor` на VisionFive и modified `controller-emu` на RockPI, затем подать GPIO edge на RockPI input line `6` и проверить изменение output line `7` через response PLC.

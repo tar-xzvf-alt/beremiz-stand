@@ -389,7 +389,111 @@ ssh root@10.42.0.211 'ssh root@10.43.0.2 "ps -eLo pid,tid,cls,rtprio,comm,args |
 
 Важно: не запускайте `controller-once`, `controller-loop` и `controller-gpio-loop` одновременно на одном RockPI `end0`. У них один EtherType `0x1122`, поэтому два raw socket consumers могут конкурировать за response frames и давать ложные timeouts.
 
-## 13. Частые Проблемы
+## 13. Supervised Raw Ethernet Через `rt-supervisor`
+
+Этот раздел относится к варианту, где raw Ethernet, fragmentation/reassembly, CRC, watchdog и restart runtime выполняет штатный `rt-supervisor`, а Beremiz runtime общается с supervisor только через `/dev/shm` + futex.
+
+Схема:
+
+```text
+RockPI controller-emu
+  GPIO edge -> BETH v2 request in 96 KiB logical payload
+        |
+        v
+VisionFive alt-rt-supervisor
+  raw Ethernet -> /dev/shm/shmem_input -> futex wake
+        |
+        v
+Beremiz supervised-raw-plc
+  __retrieve reads request, PLC computes output, __publish writes response
+        |
+        v
+alt-rt-supervisor -> raw Ethernet response -> RockPI controller-emu -> GPIO output
+```
+
+`BETH v2` занимает первые `16` bytes `controller_msg_t.payload`. Остальные `rt-supervisor` детали остаются без изменений: logical payload `96 KiB`, fragmentation по Ethernet frames и CRC trailer.
+
+### 13.1. Собрать И Установить Supervised PLC
+
+Синхронизировать и собрать project на VisionFive:
+
+```bash
+scripts/sync_to_visionfive.sh
+scripts/build_supervised_raw_on_visionfive.sh
+```
+
+Установить wrapper, который `alt-rt-supervisor` будет запускать через `-r`:
+
+```bash
+scripts/install_supervised_runtime_wrapper_on_visionfive.sh
+```
+
+Wrapper создается здесь:
+
+```text
+/root/beremiz-runtime/supervised-raw-plc/start_runtime.sh
+```
+
+### 13.2. Загрузить PLC В Runtime Directory
+
+Для загрузки `.so` сначала запустите временный standalone Beremiz runtime:
+
+```bash
+scripts/start_runtime_on_visionfive.sh root@10.42.0.211 /root/beremiz-runtime/supervised-raw-plc 10.42.0.211 3000
+scripts/deploy_run_supervised_raw_on_visionfive_runtime.sh
+/usr/bin/python3 scripts/check_runtime_status.py ERPC://10.42.0.211:3000
+scripts/stop_runtime_on_visionfive.sh root@10.42.0.211 /root/beremiz-runtime/supervised-raw-plc
+```
+
+Ожидаемый status перед остановкой временного runtime:
+
+```text
+PLC Status: Started
+```
+
+### 13.3. Запустить Supervised Stack
+
+На VisionFive должен быть собран `rt-supervisor` target `alt-rt-supervisor`, а на RockPI target `controller-emu`. Сборка выполняется на самих платах, потому что локальный ПК может не иметь `cmake`.
+
+Запустить supervisor на VisionFive `end0`:
+
+```bash
+ssh root@10.42.0.211 '/root/rt-supervisor/Build/src/alt-rt-supervisor -i end0 -t 500000 -r /root/beremiz-runtime/supervised-raw-plc/start_runtime.sh'
+```
+
+Запустить modified `controller-emu` на RockPI:
+
+```bash
+ssh root@10.42.0.211 'ssh root@10.43.0.2 "/root/rt-supervisor/Build/src/controller-emu -i end0"'
+```
+
+Functional проверка требует GPIO pulses от Arduino/rt-tester или контролируемый edge на RockPI input line `6`.
+
+### 13.4. Проверки
+
+Shared memory slots на VisionFive:
+
+```bash
+ssh root@10.42.0.211 'ls -l /dev/shm/shmem_input /dev/shm/shmem_output'
+```
+
+Ожидаемый размер каждого slot: `98312` bytes.
+
+Beremiz runtime должен быть child `alt-rt-supervisor`, а не отдельным direct raw runtime. Проверка:
+
+```bash
+ssh root@10.42.0.211 'ps -eLo pid,ppid,cls,rtprio,cmd | grep -E "[a]lt-rt-supervisor|[B]eremiz_service.py"'
+```
+
+PLC status через ERPC, пока supervised runtime жив:
+
+```bash
+/usr/bin/python3 scripts/check_runtime_status.py ERPC://10.42.0.211:3000
+```
+
+Не запускайте direct raw `device-controller/*` одновременно с `rt-supervisor/controller-emu` на том же RockPI `end0` и EtherType `0x1122`.
+
+## 14. Частые Проблемы
 
 ### Simulator Не Отвечает
 

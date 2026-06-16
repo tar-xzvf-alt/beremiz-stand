@@ -1,9 +1,10 @@
 # Beremiz Project
 
-В каталоге лежат два Beremiz project variants:
+В каталоге лежат три Beremiz project variants:
 
 - `study-plc/`: базовый Modbus TCP project.
 - `direct-raw-plc/`: экспериментальный raw Ethernet project для RockPI/VisionFive схемы без Modbus в control loop.
+- `supervised-raw-plc/`: experimental project для запуска Beremiz runtime как child `rt-supervisor`, с обменом через `/dev/shm` + futex.
 
 `study-plc/` создан штатным API установленного Beremiz (`ProjectController.NewProject`) и является начальным PLC-проектом стенда.
 
@@ -229,3 +230,72 @@ scripts/build_controller_on_rockpi.sh
 Default GPIO mapping is `/dev/gpiochip4`, input line `6`, output line `7`. `controller-gpio-loop` uses `SCHED_FIFO` priority `80`, locks memory with `mlockall`, sets the RockPI GPIO IRQ thread to `SCHED_FIFO` priority `99`, and has per-cycle logging disabled for measurement. On send/timeout error it leaves output line `7` unchanged.
 
 Use `scripts/run_controller_once_on_rockpi.sh`, `scripts/run_controller_loop_on_rockpi.sh`, and `scripts/run_controller_gpio_loop_on_rockpi.sh` sequentially. Do not run multiple raw controller programs on RockPI `end0` at the same time.
+
+## Supervised Raw PLC
+
+`supervised-raw-plc` использует ту же учебную ST-логику `alarm := sensor_value > threshold`, но transport переносится в штатную архитектуру `rt-supervisor`.
+
+Схема runtime:
+
+```text
+RockPI rt-supervisor/controller-emu
+  BETH v2 request in first 16 bytes of controller_msg_t.payload
+        |
+        v
+VisionFive alt-rt-supervisor
+  raw Ethernet fragmentation/reassembly, CRC, watchdog
+  /dev/shm/shmem_input + /dev/shm/shmem_output + futex
+        |
+        v
+Beremiz runtime supervised-raw-plc
+  c_ext reads shmem input in __retrieve
+  PLC ST logic computes output_command
+  c_ext writes shmem output in __publish
+```
+
+Measurement profile:
+
+- cycle task: `task0`, `T#10ms`;
+- PLC task thread: `SCHED_FIFO`, priority `85`;
+- supervisor payload: existing `rt-supervisor` logical payload, `96 KiB`;
+- protocol v2 fields: first `16` bytes of the logical payload;
+- Beremiz runtime does not open raw Ethernet sockets in this variant.
+
+External variables, declared in `c_ext_0@c_ext/cfile.xml`:
+
+| Variable | Direction in PLC logic | Meaning |
+| --- | --- | --- |
+| `RawSensorValue` | input | `sensor_value` from supervised request |
+| `RawThreshold` | input | threshold from supervised request |
+| `RawForcedOutput` | input | remote echo/test value from supervised request |
+| `RawSequence` | input | request sequence id |
+| `RawOutputCommand` | output | PLC-computed output sent in supervised response |
+
+Build on VisionFive 2:
+
+```bash
+scripts/sync_to_visionfive.sh
+scripts/build_supervised_raw_on_visionfive.sh
+```
+
+Install/update runtime wrapper:
+
+```bash
+scripts/install_supervised_runtime_wrapper_on_visionfive.sh
+```
+
+The wrapper is installed as `/root/beremiz-runtime/supervised-raw-plc/start_runtime.sh` and is intended for `alt-rt-supervisor -r`.
+
+Deploy PLC into the runtime directory using a temporary standalone Beremiz service:
+
+```bash
+scripts/start_runtime_on_visionfive.sh root@10.42.0.211 /root/beremiz-runtime/supervised-raw-plc 10.42.0.211 3000
+scripts/deploy_run_supervised_raw_on_visionfive_runtime.sh
+scripts/stop_runtime_on_visionfive.sh root@10.42.0.211 /root/beremiz-runtime/supervised-raw-plc
+```
+
+Run under `rt-supervisor`:
+
+```bash
+ssh root@10.42.0.211 '/root/rt-supervisor/Build/src/alt-rt-supervisor -i end0 -t 500000 -r /root/beremiz-runtime/supervised-raw-plc/start_runtime.sh'
+```

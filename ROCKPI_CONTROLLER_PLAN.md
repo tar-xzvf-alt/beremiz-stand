@@ -440,18 +440,18 @@ Functional test не завершен: нужен физический edge на
 
 ### Этап 7. Shared Memory / Supervisor Variant
 
-После работающего GPIO loop можно приблизиться к `rt-supervisor` глубже:
+После работающего direct raw GPIO loop выбран вариант максимального переиспользования `rt-supervisor` как есть:
 
 ```text
-RockPI raw Ethernet
+RockPI rt-supervisor/controller-emu
         |
         v
-VisionFive supervisor process
+VisionFive alt-rt-supervisor
   raw socket / watchdog / timeout / RT priority
   shared memory input/output
         |
         v
-Beremiz runtime c_ext
+Beremiz runtime supervised-raw-plc c_ext
   __retrieve reads shm -> PLC variables
   __publish writes PLC outputs -> shm
 ```
@@ -461,9 +461,32 @@ Beremiz runtime c_ext
 - raw Ethernet code уходит из Beremiz runtime;
 - supervisor может иметь отдельные RT priorities и watchdog;
 - Beremiz `__retrieve`/`__publish` остаются быстрым copy path;
-- архитектура становится ближе к `rt-supervisor`.
+- архитектура становится штатным `rt-supervisor` path для transport/restart;
+- измеряется не single-frame direct raw path, а 96 KiB logical payload с fragmentation/reassembly.
 
-Этот этап не делаем до завершения once exchange и GPIO loop.
+Protocol v2 `BETH` остается в первых `16` bytes payload. В direct raw path это первые `16` bytes Ethernet payload, а в supervised path это первые `16` bytes `controller_msg_t.payload` размером `96 KiB`.
+
+Добавлен отдельный Beremiz project:
+
+```text
+beremiz-project/supervised-raw-plc
+```
+
+Добавлены helper scripts:
+
+```text
+scripts/build_supervised_raw_on_visionfive.sh
+scripts/deploy_run_supervised_raw_on_visionfive_runtime.sh
+scripts/install_supervised_runtime_wrapper_on_visionfive.sh
+```
+
+Wrapper установлен на VisionFive как:
+
+```text
+/root/beremiz-runtime/supervised-raw-plc/start_runtime.sh
+```
+
+Smoke-test `alt-rt-supervisor -r start_runtime.sh` уже подтвердил, что Beremiz runtime стартует как child supervisor и создаются `/dev/shm/shmem_input`/`shmem_output` размером `98312` bytes.
 
 ## Открытые Вопросы
 
