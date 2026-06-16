@@ -54,7 +54,7 @@ RawOutputCommand := output_command;]]></xhtml:p>
     <configurations>
       <configuration name="config">
         <resource name="resource1">
-          <task name="task0" interval="T#10ms" priority="0">
+		  <task name="task0" interval="T#1ms" priority="0">
             <pouInstance name="instance0" typeName="plc_prg"/>
           </task>
         </resource>

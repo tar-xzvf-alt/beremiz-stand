@@ -150,7 +150,7 @@ The demo forces Modbus register `1` to the wrong value before each case, then wa
 
 Measurement profile:
 
-- cycle task: `task0`, `T#10ms`;
+- cycle task: `task0`, `T#1ms`;
 - raw receiver thread: `SCHED_FIFO`, priority `80`;
 - PLC task thread: `SCHED_FIFO`, priority `85`;
 - raw Ethernet request/response: one padded `1514` byte frame per direction, with protocol v2 in the first `16` payload bytes;
@@ -255,7 +255,7 @@ Beremiz runtime supervised-raw-plc
 
 Measurement profile:
 
-- cycle task: `task0`, `T#10ms`;
+- cycle task: `task0`, `T#1ms`;
 - PLC task thread: `SCHED_FIFO`, priority `85`;
 - supervisor payload: existing `rt-supervisor` logical payload, `96 KiB`;
 - protocol v2 fields: first `16` bytes of the logical payload;

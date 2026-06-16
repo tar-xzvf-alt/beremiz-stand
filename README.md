@@ -125,7 +125,7 @@ Modbus simulator хранит три holding registers:
 | `1` | `output_command` |
 | `2` | `threshold` |
 
-`study-plc` каждые `100 ms` читает Modbus registers `0..2`, вычисляет alarm и пишет результат в register `1`. `direct-raw-plc` использует ту же логику, но в измерительном профиле работает с period `T#10ms` и получает входы из raw Ethernet `c_ext`. `supervised-raw-plc` также работает с period `T#10ms`, но получает входы из shared memory slots, которыми управляет `alt-rt-supervisor`.
+`study-plc` каждые `100 ms` читает Modbus registers `0..2`, вычисляет alarm и пишет результат в register `1`. `direct-raw-plc` использует ту же логику, но в измерительном профиле работает с period `T#10ms` и получает входы из raw Ethernet `c_ext`. `supervised-raw-plc` работает с period `T#1ms`, потому что `rt-supervisor` path передает 96 KiB logical message и должен успевать отвечать до Arduino timeout при `measurement-interval-us = 5000`.
 
 ```iecst
 alarm := sensor_value > threshold;

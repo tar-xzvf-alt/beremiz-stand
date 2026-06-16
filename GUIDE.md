@@ -411,7 +411,7 @@ Beremiz supervised-raw-plc
 alt-rt-supervisor -> raw Ethernet response -> RockPI controller-emu -> GPIO output
 ```
 
-`BETH v2` занимает первые `16` bytes `controller_msg_t.payload`. Остальные `rt-supervisor` детали остаются без изменений: logical payload `96 KiB`, fragmentation по Ethernet frames и CRC trailer.
+`BETH v2` занимает первые `16` bytes `controller_msg_t.payload`. Остальные `rt-supervisor` детали остаются без изменений: logical payload `96 KiB`, fragmentation по Ethernet frames и CRC trailer. `supervised-raw-plc` использует `task0 T#1ms`, чтобы успевать отвечать при `rt-tester` interval `5000 us`.
 
 ### 13.1. Собрать И Установить Supervised PLC
 
