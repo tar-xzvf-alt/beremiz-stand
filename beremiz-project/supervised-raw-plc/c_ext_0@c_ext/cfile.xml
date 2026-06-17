@@ -33,7 +33,7 @@
 #define RAW_V2_REQUEST 1
 #define RAW_V2_RESPONSE 2
 #define RAW_V2_STATUS_OK 0
-#define PLC_TASK_RT_PRIORITY 85
+#define PLC_TASK_RT_PRIORITY 92
 
 struct slot_t {
     volatile atomic_uint_fast32_t sequence;

@@ -413,6 +413,20 @@ alt-rt-supervisor -> raw Ethernet response -> RockPI controller-emu -> GPIO outp
 
 `BETH v2` занимает первые `16` bytes `controller_msg_t.payload`. Остальные `rt-supervisor` детали остаются без изменений: logical payload `96 KiB`, fragmentation по Ethernet frames и CRC trailer. `supervised-raw-plc` использует `task0 T#1ms`, чтобы успевать отвечать при `rt-tester` interval `5000 us`.
 
+Текущий RT/isolation profile:
+
+| Плата | Поток | Ожидаемо |
+| --- | --- | --- |
+| VisionFive | boot isolation | `isolated=1-2`, `nohz_full=1-2` |
+| VisionFive | Beremiz PLC cyclic thread | `FF 92`, CPU `2` |
+| VisionFive | `alt-rt-supervisor` | `FF 88`, CPU `1` |
+| VisionFive | `end0` IRQ | `FF 82`, CPU `0` |
+| RockPI | boot isolation | `isolated=3`, `nohz_full=3` |
+| RockPI | GPIO IRQ `rockpi4-monitor` | `FF 99`, CPU `3` |
+| RockPI | `controller-emu` RT thread | `FF 85`, CPU `3` |
+| RockPI | `end0` IRQ | `FF 75`, CPU `0` |
+| обе | `node_exporter` | `TS`, housekeeping CPUs |
+
 ### 13.1. Собрать И Установить Supervised PLC
 
 Синхронизировать и собрать project на VisionFive:
@@ -458,13 +472,20 @@ PLC Status: Started
 Запустить supervisor на VisionFive `end0`:
 
 ```bash
-ssh root@10.42.0.211 '/root/rt-supervisor/Build/src/alt-rt-supervisor -i end0 -t 500000 -r /root/beremiz-runtime/supervised-raw-plc/start_runtime.sh'
+ssh root@10.42.0.211 '/root/rt-supervisor/Build/src/alt-rt-supervisor -i end0 -t 5000000 -r /root/beremiz-runtime/supervised-raw-plc/start_runtime.sh'
 ```
 
 Запустить modified `controller-emu` на RockPI:
 
 ```bash
 ssh root@10.42.0.211 'ssh root@10.43.0.2 "/root/rt-supervisor/Build/src/controller-emu -i end0"'
+```
+
+После старта supervisor/runtime и controller применить CPU pinning и IRQ priorities:
+
+```bash
+ssh root@10.42.0.211 '/root/pin_visionfive_supervised.sh'
+ssh root@10.42.0.211 'ssh root@10.43.0.2 "/root/pin_rockpi_controller.sh"'
 ```
 
 Functional проверка требует GPIO pulses от Arduino/rt-tester или контролируемый edge на RockPI input line `6`.
@@ -490,6 +511,17 @@ PLC status через ERPC, пока supervised runtime жив:
 ```bash
 /usr/bin/python3 scripts/check_runtime_status.py ERPC://10.42.0.211:3000
 ```
+
+RT/isolation проверка перед измерением:
+
+```bash
+ssh root@10.42.0.211 'printf "vf isolated="; cat /sys/devices/system/cpu/isolated; printf " vf nohz="; cat /sys/devices/system/cpu/nohz_full; printf "\n"'
+ssh root@10.42.0.211 'ssh root@10.43.0.2 "printf rockpi-isolated=; cat /sys/devices/system/cpu/isolated; printf \" rockpi-nohz=\"; cat /sys/devices/system/cpu/nohz_full; printf \"\\n\""'
+ssh root@10.42.0.211 'ps -eLo pid,tid,cls,rtprio,psr,comm,args | grep -E "[a]lt-rt-supervisor|[B]eremiz_service.py|irq/.+-end0"'
+ssh root@10.42.0.211 'ssh root@10.43.0.2 "ps -eLo pid,tid,cls,rtprio,psr,comm,args | grep -E \"[c]ontroller-emu|irq/.+-rockpi4-monitor|irq/.+-end0|[n]ode_exporter\""'
+```
+
+Ожидаемые ключевые строки: `alt-rt-supervisor FF 88 CPU1`, Beremiz PLC thread `FF 92 CPU2`, VisionFive `end0` IRQ `FF 82 CPU0`, RockPI `controller-emu FF 85 CPU3`, RockPI GPIO IRQ `FF 99 CPU3`, RockPI `end0` IRQ `FF 75 CPU0`, `node_exporter TS`.
 
 Не запускайте direct raw `device-controller/*` одновременно с `rt-supervisor/controller-emu` на том же RockPI `end0` и EtherType `0x1122`.
 

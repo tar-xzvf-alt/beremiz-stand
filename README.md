@@ -79,6 +79,21 @@ RockPI end0, 10.43.0.2/24
 
 В supervised схеме Beremiz runtime не открывает raw socket. `BETH v2` request/response лежит в первых `16` bytes 96 KiB payload, а остальной transport, fragmentation, CRC, watchdog и restart path остаются штатными для `rt-supervisor`.
 
+Измерительный supervised profile использует изоляцию CPU и явный pinning:
+
+| Плата | Поток | Class/Priority | CPU |
+| --- | --- | --- | --- |
+| VisionFive | Beremiz PLC cyclic thread | `FF 92` | `2` |
+| VisionFive | `alt-rt-supervisor` | `FF 88` | `1` |
+| VisionFive | `end0` IRQ | `FF 82` | `0` |
+| VisionFive | прочие Beremiz service threads | `FF 60` | `0,3` |
+| RockPI | GPIO IRQ `rockpi4-monitor` | `FF 99` | `3` |
+| RockPI | `controller-emu` RT thread | `FF 85` | `3` |
+| RockPI | `end0` IRQ | `FF 75` | `0` |
+| обе | `node_exporter` | `TS` | housekeeping CPUs |
+
+Boot isolation: VisionFive `isolated=1-2`, RockPI `isolated=3`. После запуска процессов нужно выполнить `/root/pin_visionfive_supervised.sh` и `/root/pin_rockpi_controller.sh`, потому что нужные TID появляются только во время runtime.
+
 ## Что Реализовано
 
 Основные артефакты:
@@ -286,6 +301,18 @@ RT profile для измерений:
 - Raw Ethernet request/response size: one padded Ethernet frame per direction, `1514 bytes` total (`14` byte Ethernet header + `1500` byte payload). Protocol v2 fields remain in the first `16` payload bytes; the rest is zero padding.
 - При send/timeout error `controller-gpio-loop` оставляет output line `7` без изменения, чтобы Arduino/rt-tester сам зафиксировал отсутствие ожидаемого edge.
 
+Supervised raw RT profile для текущих измерений:
+
+- VisionFive `alt-rt-supervisor`: `SCHED_FIFO 88`, `mlockall(MCL_CURRENT | MCL_FUTURE)`, CPU `1`.
+- VisionFive Beremiz PLC cyclic thread: `SCHED_FIFO 92`, CPU `2`.
+- VisionFive `end0` IRQ: `SCHED_FIFO 82`, CPU `0`.
+- RockPI `controller-emu` RT thread: `SCHED_FIFO 85`, CPU `3`.
+- RockPI GPIO IRQ thread `irq/...-rockpi4-monitor`: `SCHED_FIFO 99`, CPU `3`.
+- RockPI `end0` IRQ: `SCHED_FIFO 75`, CPU `0`.
+- `node_exporter` остается `TS` и закрепляется на housekeeping CPUs.
+- `supervised-raw-plc` task period: `T#1ms`.
+- `rt-supervisor` logical payload: `96 KiB`, fragmented over raw Ethernet, EtherType `0x1122`.
+
 Не запускайте одновременно несколько RockPI controller programs на одном `end0`/EtherType `0x1122`: два raw socket consumers могут конкурировать за response frames. Проверки `controller-once`, `controller-loop` и `controller-gpio-loop` запускаются последовательно.
 
 ## Быстрый Старт
@@ -327,11 +354,27 @@ scripts/sync_to_visionfive.sh
 scripts/build_supervised_raw_on_visionfive.sh
 scripts/install_supervised_runtime_wrapper_on_visionfive.sh
 scripts/stop_runtime_on_visionfive.sh root@10.42.0.211 /root/beremiz-runtime/supervised-raw-plc
-ssh root@10.42.0.211 '/root/rt-supervisor/Build/src/alt-rt-supervisor -i end0 -t 500000 -r /root/beremiz-runtime/supervised-raw-plc/start_runtime.sh'
+ssh root@10.42.0.211 '/root/rt-supervisor/Build/src/alt-rt-supervisor -i end0 -t 5000000 -r /root/beremiz-runtime/supervised-raw-plc/start_runtime.sh'
 ```
 
 На RockPI во втором терминале:
 
 ```bash
 ssh root@10.42.0.211 'ssh root@10.43.0.2 "/root/rt-supervisor/Build/src/controller-emu -i end0"'
+```
+
+После старта обоих процессов применить pinning/IRQ priorities:
+
+```bash
+ssh root@10.42.0.211 '/root/pin_visionfive_supervised.sh'
+ssh root@10.42.0.211 'ssh root@10.43.0.2 "/root/pin_rockpi_controller.sh"'
+```
+
+Минимальная проверка перед запуском `rt-tester`:
+
+```bash
+ssh root@10.42.0.211 'cat /sys/devices/system/cpu/isolated; cat /sys/devices/system/cpu/nohz_full'
+ssh root@10.42.0.211 'ssh root@10.43.0.2 "cat /sys/devices/system/cpu/isolated; cat /sys/devices/system/cpu/nohz_full"'
+ssh root@10.42.0.211 'ps -eLo pid,tid,cls,rtprio,psr,comm,args | grep -E "[a]lt-rt-supervisor|[B]eremiz_service.py|irq/.+-end0"'
+ssh root@10.42.0.211 'ssh root@10.43.0.2 "ps -eLo pid,tid,cls,rtprio,psr,comm,args | grep -E \"[c]ontroller-emu|irq/.+-rockpi4-monitor|irq/.+-end0|[n]ode_exporter\""'
 ```

@@ -409,7 +409,7 @@ scripts/install_supervised_runtime_wrapper_on_visionfive.sh
 Проверенный smoke-test wrapper/supervisor startup на VisionFive:
 
 ```bash
-timeout 5s /root/rt-supervisor/Build/src/alt-rt-supervisor -i end0 -t 500000 -r /root/beremiz-runtime/supervised-raw-plc/start_runtime.sh
+timeout 5s /root/rt-supervisor/Build/src/alt-rt-supervisor -i end0 -t 5000000 -r /root/beremiz-runtime/supervised-raw-plc/start_runtime.sh
 ```
 
 Ожидаемый `timeout` status: `124`. При запуске создаются shared memory slots:
@@ -425,6 +425,20 @@ Runtime log показывает startup Beremiz service:
 Beremiz_service:  1.4
 eRPC port : 3000
 Current working directory :.
+```
+
+Текущий supervised measurement profile:
+
+```text
+VisionFive isolation: isolated=1-2, nohz_full=1-2
+VisionFive alt-rt-supervisor: SCHED_FIFO priority 88, CPU1
+VisionFive Beremiz PLC cyclic thread: SCHED_FIFO priority 92, CPU2
+VisionFive end0 IRQ: SCHED_FIFO priority 82, CPU0
+RockPI isolation: isolated=3, nohz_full=3
+RockPI controller-emu RT thread: SCHED_FIFO priority 85, CPU3
+RockPI GPIO IRQ thread: SCHED_FIFO priority 99, CPU3
+RockPI end0 IRQ: SCHED_FIFO priority 75, CPU0
+node_exporter: SCHED_OTHER on housekeeping CPUs
 ```
 
 Оставшаяся functional проверка: одновременно запустить `alt-rt-supervisor` на VisionFive и modified `controller-emu` на RockPI, затем подать GPIO edge на RockPI input line `6` и проверить изменение output line `7` через response PLC.

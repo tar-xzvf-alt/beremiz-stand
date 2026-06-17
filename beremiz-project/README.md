@@ -256,7 +256,10 @@ Beremiz runtime supervised-raw-plc
 Measurement profile:
 
 - cycle task: `task0`, `T#1ms`;
-- PLC task thread: `SCHED_FIFO`, priority `85`;
+- PLC task thread: `SCHED_FIFO`, priority `92`;
+- `alt-rt-supervisor`: `SCHED_FIFO`, priority `88`;
+- RockPI `controller-emu` RT thread: `SCHED_FIFO`, priority `85`;
+- Ethernet IRQ priorities are set by `/root/pin_visionfive_supervised.sh` and `/root/pin_rockpi_controller.sh`;
 - supervisor payload: existing `rt-supervisor` logical payload, `96 KiB`;
 - protocol v2 fields: first `16` bytes of the logical payload;
 - Beremiz runtime does not open raw Ethernet sockets in this variant.
@@ -297,5 +300,7 @@ scripts/stop_runtime_on_visionfive.sh root@10.42.0.211 /root/beremiz-runtime/sup
 Run under `rt-supervisor`:
 
 ```bash
-ssh root@10.42.0.211 '/root/rt-supervisor/Build/src/alt-rt-supervisor -i end0 -t 500000 -r /root/beremiz-runtime/supervised-raw-plc/start_runtime.sh'
+ssh root@10.42.0.211 '/root/rt-supervisor/Build/src/alt-rt-supervisor -i end0 -t 5000000 -r /root/beremiz-runtime/supervised-raw-plc/start_runtime.sh'
+ssh root@10.42.0.211 '/root/pin_visionfive_supervised.sh'
+ssh root@10.42.0.211 'ssh root@10.43.0.2 "/root/pin_rockpi_controller.sh"'
 ```

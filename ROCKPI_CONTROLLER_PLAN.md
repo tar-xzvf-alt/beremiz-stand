@@ -383,6 +383,8 @@ RockPI GPIO IRQ thread: SCHED_FIFO priority 99
 mlockall(MCL_CURRENT | MCL_FUTURE): enabled on both devices
 ```
 
+Supervised raw measurement profile differs from direct raw: Beremiz PLC cyclic thread uses `SCHED_FIFO 92`, `alt-rt-supervisor` uses `SCHED_FIFO 88`, RockPI `controller-emu` uses `SCHED_FIFO 85`, Ethernet IRQs are raised to `82` on VisionFive and `75` on RockPI, and `node_exporter` remains `TS` on housekeeping CPUs.
+
 Build на RockPI:
 
 ```bash
