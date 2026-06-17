@@ -469,23 +469,25 @@ PLC Status: Started
 
 На VisionFive должен быть собран `rt-supervisor` target `alt-rt-supervisor`, а на RockPI target `controller-emu`. Сборка выполняется на самих платах, потому что локальный ПК может не иметь `cmake`.
 
-Запустить supervisor на VisionFive `end0`:
+Запустить полный supervised stack:
 
 ```bash
-ssh root@10.42.0.211 '/root/rt-supervisor/Build/src/alt-rt-supervisor -i end0 -t 5000000 -r /root/beremiz-runtime/supervised-raw-plc/start_runtime.sh'
+scripts/start_supervised_stack.sh
 ```
 
-Запустить modified `controller-emu` на RockPI:
+Этот скрипт:
+
+- останавливает старые `controller-emu`, `alt-rt-supervisor` и `Beremiz_service.py` через `kill` по точным PID;
+- удаляет старые `/dev/shm/shmem_input` и `/dev/shm/shmem_output`;
+- запускает `alt-rt-supervisor` на VisionFive и `controller-emu` на RockPI;
+- применяет `/root/pin_visionfive_supervised.sh` и `/root/pin_rockpi_controller.sh`.
+
+`pkill -f` намеренно не используется, чтобы не задеть текущую SSH/session shell.
+
+Остановить supervised stack вручную:
 
 ```bash
-ssh root@10.42.0.211 'ssh root@10.43.0.2 "/root/rt-supervisor/Build/src/controller-emu -i end0"'
-```
-
-После старта supervisor/runtime и controller применить CPU pinning и IRQ priorities:
-
-```bash
-ssh root@10.42.0.211 '/root/pin_visionfive_supervised.sh'
-ssh root@10.42.0.211 'ssh root@10.43.0.2 "/root/pin_rockpi_controller.sh"'
+scripts/stop_supervised_stack.sh
 ```
 
 Functional проверка требует GPIO pulses от Arduino/rt-tester или контролируемый edge на RockPI input line `6`.

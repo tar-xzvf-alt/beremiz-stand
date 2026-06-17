@@ -300,7 +300,7 @@ scripts/stop_runtime_on_visionfive.sh root@10.42.0.211 /root/beremiz-runtime/sup
 Run under `rt-supervisor`:
 
 ```bash
-ssh root@10.42.0.211 '/root/rt-supervisor/Build/src/alt-rt-supervisor -i end0 -t 5000000 -r /root/beremiz-runtime/supervised-raw-plc/start_runtime.sh'
-ssh root@10.42.0.211 '/root/pin_visionfive_supervised.sh'
-ssh root@10.42.0.211 'ssh root@10.43.0.2 "/root/pin_rockpi_controller.sh"'
+scripts/start_supervised_stack.sh
 ```
+
+Use `scripts/stop_supervised_stack.sh` to stop previous supervised processes. It stops `controller-emu`, `alt-rt-supervisor`, and `Beremiz_service.py` by exact PID using `kill`; it does not use `pkill -f`.
