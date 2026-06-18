@@ -22,7 +22,9 @@ ssh root@10.42.0.211 'ssh root@10.43.0.2 true'
 
 ## 2. Подготовить `rt-supervisor`
 
-Этот репозиторий не содержит исходники `rt-supervisor`. На платах должны быть уже собраны:
+Исходники `rt-supervisor`: https://altlinux.space/besogon1238/rt-supervisor
+
+На платах должны быть уже собраны:
 
 ```text
 VisionFive: /root/rt-supervisor/Build/src/alt-rt-supervisor
@@ -36,7 +38,42 @@ VisionFive: /root/pin_visionfive_supervised.sh
 RockPI:     /root/pin_rockpi_controller.sh
 ```
 
-## 3. Остановить Старый Stack
+Пакеты ALT Linux для сборки `rt-supervisor` на VisionFive и RockPI:
+
+```bash
+apt-get install cmake gcc make binutils glibc-devel zlib-devel libgpiod-devel
+```
+
+Пример сборки в `/root/rt-supervisor`:
+
+```bash
+cmake -B Build -DBOARD=repkapi4
+cmake --build Build
+```
+
+Для RockPI используйте board, соответствующий его конфигурации в `rt-supervisor`.
+
+## 3. Установить Пакеты ALT Linux
+
+На ПК `x86_64`:
+
+```bash
+su - -c 'apt-get install beremiz matiec python3 python3-module-serial python3-module-requests python3-module-prometheus_client openssh-clients tar git'
+```
+
+На VisionFive `riscv64`:
+
+```bash
+apt-get install beremiz matiec python3 openssh-clients openssh-server tar git gcc make binutils glibc-devel cmake zlib-devel libgpiod-devel kernel-image-rt
+```
+
+На RockPI `aarch64`:
+
+```bash
+apt-get install python3 openssh-clients openssh-server tar git gcc make binutils glibc-devel cmake zlib-devel libgpiod-devel kernel-image-rt
+```
+
+## 4. Остановить Старый Stack
 
 ```bash
 scripts/stop_supervised_stack.sh
@@ -44,7 +81,7 @@ scripts/stop_supervised_stack.sh
 
 Скрипт останавливает только точные процессы `controller-emu`, `alt-rt-supervisor` и `Beremiz_service.py`.
 
-## 4. Передать Проект На VisionFive
+## 5. Передать Проект На VisionFive
 
 ```bash
 scripts/sync_to_visionfive.sh
@@ -56,7 +93,7 @@ scripts/sync_to_visionfive.sh
 /root/beremiz-stand
 ```
 
-## 5. Собрать PLC На VisionFive
+## 6. Собрать PLC На VisionFive
 
 ```bash
 scripts/build_supervised_raw_on_visionfive.sh
@@ -64,7 +101,7 @@ scripts/build_supervised_raw_on_visionfive.sh
 
 Сборка выполняется на VisionFive, потому что runtime artifact должен быть для `riscv64`.
 
-## 6. Загрузить PLC В Runtime Directory
+## 7. Загрузить PLC В Runtime Directory
 
 Для загрузки `.so` нужен временный standalone Beremiz runtime:
 
@@ -77,7 +114,7 @@ scripts/stop_runtime_on_visionfive.sh
 
 После этого в `/root/beremiz-runtime/supervised-raw-plc` лежит PLC и wrapper `start_runtime.sh`, который supervisor будет запускать как child process.
 
-## 7. Запустить Supervised Stack
+## 8. Запустить Supervised Stack
 
 Для GUI-наблюдения используйте длинный watchdog timeout:
 
@@ -98,6 +135,22 @@ scripts/start_supervised_stack.sh
 - `controller-emu` на RockPI;
 - RT priorities и CPU affinity через pinning scripts.
 
+Если нужно запустить именно supervisor вручную на VisionFive, команда такая:
+
+```bash
+rm -f /dev/shm/shmem_input /dev/shm/shmem_output
+/root/rt-supervisor/Build/src/alt-rt-supervisor \
+  -i end0 \
+  -t 30000000 \
+  -r /root/beremiz-runtime/supervised-raw-plc/start_runtime.sh
+```
+
+Здесь `-r` указывает wrapper Beremiz runtime, который supervisor запускает и перезапускает при watchdog timeout. Для запуска всего стенда вручную дополнительно нужен controller на RockPI:
+
+```bash
+/root/rt-supervisor/Build/src/controller-emu -i end0
+```
+
 Проверка:
 
 ```bash
@@ -112,7 +165,7 @@ ssh root@10.42.0.211 'ssh root@10.43.0.2 "pgrep -af controller-emu"'
 PLC Status: Started
 ```
 
-## 8. Подготовить GUI Debug Build
+## 9. Подготовить GUI Debug Build
 
 Beremiz GUI должен иметь локальный `build/VARIABLES.csv`, совпадающий с PLC на VisionFive. После каждой remote-сборки выполните:
 
@@ -137,7 +190,7 @@ Debugger ready
 
 Если видите ошибку про `VARIABLES.csv` или mismatch программы, снова выполните `scripts/sync_supervised_debug_build_from_visionfive.sh`.
 
-## 9. Открыть Beremiz GUI
+## 10. Открыть Beremiz GUI
 
 ```bash
 beremiz beremiz-project/supervised-raw-plc
@@ -152,7 +205,7 @@ beremiz beremiz-project/supervised-raw-plc
 5. Включите online/debug monitoring кнопкой debug/monitor.
 6. Смотрите значения переменных рядом с ST-кодом или в watch/debug view.
 
-## 10. Что Смотреть В GUI
+## 11. Что Смотреть В GUI
 
 Основные переменные:
 
@@ -180,7 +233,7 @@ beremiz beremiz-project/supervised-raw-plc
 - если они растут, RockPI реально получает новые GPIO edges;
 - если они не растут, это не новый request, а эффект отображения/reconnect GUI.
 
-## 11. Запустить Измерение Через rt-tester
+## 12. Запустить Измерение Через rt-tester
 
 Измеритель находится в соседнем проекте `rt-tester`:
 
@@ -193,7 +246,7 @@ python3 receiver.py --params measurement.conf
 
 Для GUI это не обязательно: переменные можно наблюдать и без receiver, если на RockPI input приходят GPIO edges.
 
-## 12. Остановить Стенд
+## 13. Остановить Стенд
 
 ```bash
 scripts/stop_supervised_stack.sh
@@ -205,7 +258,7 @@ scripts/stop_supervised_stack.sh
 scripts/stop_runtime_on_visionfive.sh
 ```
 
-## 13. Частые Проблемы
+## 14. Частые Проблемы
 
 `Не удалось открыть/прочитать VARIABLES.csv`:
 

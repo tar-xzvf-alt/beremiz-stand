@@ -40,6 +40,8 @@ RockPI end0 10.43.0.2 <-> VisionFive end0 10.43.0.1
 | `scripts/sync_supervised_debug_build_from_visionfive.sh` | подтягивает `build/VARIABLES.csv` для GUI-debug |
 | `scripts/check_runtime_status.py` | проверяет `PLC Status` через ERPC |
 
+`rt-supervisor` находится здесь: https://altlinux.space/besogon1238/rt-supervisor
+
 ## PLC-Логика
 
 RockPI отправляет в PLC значения `sensor`, `threshold` и `sequence`. PLC считает:
@@ -63,31 +65,29 @@ END_IF;
 
 Дополнительные diagnostic counters (`request_count`, `last_sequence`, `high_request_count`, `low_request_count`) нужны для GUI-наблюдения.
 
-## Пакеты
+## Пакеты ALT Linux
 
-Названия пакетов зависят от дистрибутива, но нужны такие компоненты.
+Пакеты ниже проверены на текущем стенде: ПК `x86_64`, VisionFive `riscv64`, RockPI `aarch64`.
 
 На ПК:
 
-- `beremiz` IDE/CLI;
-- `python3`;
-- `openssh-clients`, `scp`, `tar`;
-- для `rt-tester`: `pyserial`, `requests`, `prometheus-client`.
+```bash
+su - -c 'apt-get install beremiz matiec python3 python3-module-serial python3-module-requests python3-module-prometheus_client openssh-clients tar git'
+```
 
 На VisionFive 2:
 
-- `python3`, Beremiz runtime/CLI, `matiec`;
-- `gcc`, `make`, стандартные build tools для сборки PLC `.so`;
-- PREEMPT_RT kernel;
-- собранный `/root/rt-supervisor/Build/src/alt-rt-supervisor`.
+```bash
+apt-get install beremiz matiec python3 openssh-clients openssh-server tar git gcc make binutils glibc-devel cmake zlib-devel libgpiod-devel kernel-image-rt
+```
 
 На RockPI:
 
-- PREEMPT_RT kernel;
-- `libgpiod` v2 runtime;
-- собранный `/root/rt-supervisor/Build/src/controller-emu`.
+```bash
+apt-get install python3 openssh-clients openssh-server tar git gcc make binutils glibc-devel cmake zlib-devel libgpiod-devel kernel-image-rt
+```
 
-Для сборки `rt-supervisor` см. соседний репозиторий `rt-supervisor`: нужен `cmake`, `gcc`, `zlib`, `libgpiod` development headers и явный `-DBOARD=<board>`.
+`rt-supervisor` собирается отдельно из https://altlinux.space/besogon1238/rt-supervisor. Для этого нужны `cmake`, `gcc`, `zlib-devel`, `libgpiod-devel` и явный board, например `cmake -B Build -DBOARD=repkapi4`.
 
 ## Быстрый Запуск
 
@@ -121,5 +121,6 @@ ERPC://10.42.0.211:3000
 ## Важно
 
 - Для GUI/debug запускайте stack с `TIMEOUT_US=30000000`, иначе supervisor может перезапустить runtime во время polling.
+- Вручную supervisor запускается на VisionFive так: `/root/rt-supervisor/Build/src/alt-rt-supervisor -i end0 -t 30000000 -r /root/beremiz-runtime/supervised-raw-plc/start_runtime.sh`.
 - После каждой сборки PLC на VisionFive выполняйте `scripts/sync_supervised_debug_build_from_visionfive.sh`, иначе GUI не найдет локальный `build/VARIABLES.csv`.
 - `alarm` меняется не от GUI и не от receiver, а от GPIO edges, которые RockPI получает на input line.
