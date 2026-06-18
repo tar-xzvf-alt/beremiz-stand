@@ -48,6 +48,7 @@ RockPI end0 10.43.0.2 <-> VisionFive end0 10.43.0.1
 - `docs/boards.md`: GPIO profiles и добавление новых плат;
 - `docs/altlinux-packages.md`: проверенные пакеты ALT Linux;
 - `docs/beremiz-runtime.md`: запуск Beremiz runtime через `alt-rt-supervisor -r`.
+- `docs/install-deploy.md`: source tree deploy и optional `cmake --install` layout.
 
 ## PLC-Логика
 

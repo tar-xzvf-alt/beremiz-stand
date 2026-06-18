@@ -35,6 +35,7 @@ ssh root@10.42.0.211 'ssh root@10.43.0.2 true'
 - `docs/boards.md`: GPIO mappings и board names;
 - `docs/altlinux-packages.md`: пакеты ALT Linux;
 - `docs/beremiz-runtime.md`: Beremiz wrapper и ручные команды запуска.
+- `docs/install-deploy.md`: layout установки и текущий `/root/rt-supervisor` deploy.
 
 На платах должны быть уже собраны:
 
