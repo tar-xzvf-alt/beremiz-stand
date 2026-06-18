@@ -176,9 +176,7 @@ scripts/start_supervised_stack.sh
 Проверка:
 
 ```bash
-/usr/bin/python3 scripts/check_runtime_status.py ERPC://10.42.0.211:3000
-ssh root@10.42.0.211 'pgrep -af "alt-rt-supervisor|Beremiz_service.py"'
-ssh root@10.42.0.211 'ssh root@10.43.0.2 "pgrep -af controller-emu"'
+scripts/check_supervised_stack.sh
 ```
 
 Ожидаемо:
@@ -186,6 +184,10 @@ ssh root@10.42.0.211 'ssh root@10.43.0.2 "pgrep -af controller-emu"'
 ```text
 PLC Status: Started
 ```
+
+Скрипт дополнительно показывает процессы, RT priority/class, текущий CPU и
+`Cpus_allowed_list` для supervisor/runtime/controller, а также наличие shared
+memory slots в `/dev/shm`.
 
 ## 9. Подготовить GUI Debug Build
 
@@ -261,10 +263,11 @@ beremiz beremiz-project/supervised-raw-plc
 
 ```bash
 cd /home/taranev/work_repos/rt/rt-tester/src/pc-receiver
-python3 receiver.py --params measurement.conf
+python3 receiver.py --params measurement.conf --start --exit-on-stop
 ```
 
-Если receiver только что подключился к Arduino, дождитесь ответа `Measurement stopped by Arduino`, затем введите `start`. Если первый старт сбился поздним `STOP`, введите `start` второй раз.
+Для ручного режима можно запустить без `--start --exit-on-stop` и вводить
+`start`, `status`, `events`, `stop`, `exit` в интерактивной консоли.
 
 Для GUI это не обязательно: переменные можно наблюдать и без receiver, если на RockPI input приходят GPIO edges.
 
