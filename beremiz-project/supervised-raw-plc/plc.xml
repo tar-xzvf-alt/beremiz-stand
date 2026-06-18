@@ -27,6 +27,12 @@
             <variable name="sequence"><type><UDINT/></type></variable>
             <variable name="alarm"><type><BOOL/></type></variable>
             <variable name="output_command"><type><UINT/></type></variable>
+            <variable name="request_count"><type><UDINT/></type></variable>
+            <variable name="high_request_count"><type><UDINT/></type></variable>
+            <variable name="low_request_count"><type><UDINT/></type></variable>
+            <variable name="last_sequence"><type><UDINT/></type></variable>
+            <variable name="sequence_changed"><type><BOOL/></type></variable>
+            <variable name="request_seen"><type><BOOL/></type></variable>
           </localVars>
         </interface>
         <body>
@@ -37,6 +43,21 @@ remote_output_echo := RawForcedOutput;
 sequence := RawSequence;
 
 alarm := sensor_value > threshold;
+
+sequence_changed := (NOT request_seen) OR (sequence <> last_sequence);
+
+IF sequence_changed THEN
+    request_count := request_count + UDINT#1;
+
+    IF alarm THEN
+        high_request_count := high_request_count + UDINT#1;
+    ELSE
+        low_request_count := low_request_count + UDINT#1;
+    END_IF;
+
+    last_sequence := sequence;
+    request_seen := TRUE;
+END_IF;
 
 IF alarm THEN
     output_command := UINT#1;
