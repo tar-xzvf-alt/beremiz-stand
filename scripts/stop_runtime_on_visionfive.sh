@@ -2,7 +2,7 @@
 set -eu
 
 TARGET=${1:-root@10.42.0.211}
-RUNTIME_DIR=${2:-/root/beremiz-runtime/study-plc}
+RUNTIME_DIR=${2:-/root/beremiz-runtime/supervised-raw-plc}
 PIDFILE="$RUNTIME_DIR/beremiz_service.pid"
 
 ssh "$TARGET" \

@@ -5,6 +5,3 @@ venv/
 beremiz-project/*/build/
 beremiz-project/*/psk/
 .deps/
-device-controller/controller-once
-device-controller/controller-loop
-device-controller/controller-gpio-loop

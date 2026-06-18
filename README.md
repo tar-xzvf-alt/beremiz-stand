@@ -1,148 +1,48 @@
-# Учебный Стенд Beremiz На Linux-Контроллере
+# Beremiz Supervised RT Stand
 
-Репозиторий содержит учебный стенд для изучения Beremiz на Linux-контроллере. Базовый сценарий использует `Starfive VisionFive 2` как PLC и Modbus TCP simulator на ПК. Экспериментальная ветка `experiment/raw-ethernet-plc` дополнительно содержит direct raw Ethernet схему, где отдельный RockPI отправляет raw Ethernet request на VisionFive и получает raw Ethernet response от PLC, а также supervised raw схему через штатный `rt-supervisor`.
-
-Пошаговый запуск вынесен в [GUIDE.md](GUIDE.md).
-
-## Суть Стенда
-
-Стенд показывает полный цикл работы Linux PLC:
-
-- разработка проекта Beremiz на ПК;
-- нативная сборка PLC на `riscv64` плате VisionFive 2;
-- запуск `Beremiz_service.py` как persistent runtime на плате;
-- базовый обмен PLC с внешним устройством по Modbus TCP;
-- экспериментальный direct raw обмен `RockPI -> raw Ethernet -> VisionFive PLC -> raw Ethernet response -> RockPI` без Modbus в control loop;
-- supervised raw обмен через `rt-supervisor`: `RockPI controller-emu -> raw Ethernet 96 KiB logical message -> alt-rt-supervisor -> /dev/shm + futex -> Beremiz runtime`;
-- online monitoring с ПК через ERPC;
-- демонстрация переключения `alarm` и `output_command` при изменении входного значения датчика.
-
-Базовая Modbus-архитектура:
+Этот репозиторий содержит один Beremiz-проект для текущего стенда:
 
 ```text
-ПК разработчика, 10.42.0.1
-  Beremiz IDE / CLI 1.5
-  Modbus TCP simulator, port 1502
-  scripts и документация
-        |
-        | Ethernet
-        v
-Starfive VisionFive 2, 10.42.0.211
-  ALT Regular riscv64
-  PREEMPT_RT kernel
-  Beremiz runtime 1.4, ERPC port 3000
-  study-plc.so
-        |
-        | Modbus TCP client -> 10.42.0.1:1502
-        v
-Modbus holding registers simulator
+Arduino -> RockPI GPIO -> controller-emu -> raw Ethernet -> VisionFive 2
+        -> rt-supervisor -> /dev/shm + futex -> Beremiz PLC -> ответ обратно
 ```
 
-Direct raw Ethernet архитектура в текущей ветке:
+ПК не участвует в real-time loop. Он нужен для разработки, запуска scripts, Beremiz GUI и сбора измерений.
 
-```text
-ПК разработчика
-  SSH / Beremiz ERPC / monitoring
-        |
-        | VisionFive end1, 10.42.0.211/24
-        v
-Starfive VisionFive 2
-  Beremiz runtime, direct-raw-plc
-  c_ext raw Ethernet receiver/responder on end0
-        ^
-        | raw Ethernet request/response, EtherType 0x1122
-        v
-RockPI end0, 10.43.0.2/24
-  device-controller/controller-once / controller-loop / controller-gpio-loop
-```
+## Узлы
 
-В этой схеме ПК не участвует в control loop: он только запускает, загружает и наблюдает стенд.
-
-Supervised raw Ethernet архитектура через `rt-supervisor`:
-
-```text
-ПК разработчика
-  SSH / Beremiz ERPC / monitoring
-        |
-        | VisionFive end1, 10.42.0.211/24
-        v
-Starfive VisionFive 2
-  alt-rt-supervisor on end0
-  /dev/shm/shmem_input + /dev/shm/shmem_output + futex
-  Beremiz runtime, supervised-raw-plc
-        ^
-        | rt-supervisor fragmented logical payload, 96 KiB, EtherType 0x1122
-        v
-RockPI end0, 10.43.0.2/24
-  rt-supervisor/controller-emu
-```
-
-В supervised схеме Beremiz runtime не открывает raw socket. `BETH v2` request/response лежит в первых `16` bytes 96 KiB payload, а остальной transport, fragmentation, CRC, watchdog и restart path остаются штатными для `rt-supervisor`.
-
-Измерительный supervised profile использует изоляцию CPU и явный pinning:
-
-| Плата | Поток | Class/Priority | CPU |
-| --- | --- | --- | --- |
-| VisionFive | Beremiz PLC cyclic thread | `FF 92` | `2` |
-| VisionFive | `alt-rt-supervisor` | `FF 88` | `1` |
-| VisionFive | `end0` IRQ | `FF 82` | `0` |
-| VisionFive | прочие Beremiz service threads | `FF 60` | `0,3` |
-| RockPI | GPIO IRQ `rockpi4-monitor` | `FF 99` | `3` |
-| RockPI | `controller-emu` RT thread | `FF 85` | `3` |
-| RockPI | `end0` IRQ | `FF 75` | `0` |
-| обе | `node_exporter` | `TS` | housekeeping CPUs |
-
-Boot isolation: VisionFive `isolated=1-2`, RockPI `isolated=3`. После запуска процессов нужно выполнить `/root/pin_visionfive_supervised.sh` и `/root/pin_rockpi_controller.sh`, потому что нужные TID появляются только во время runtime.
-
-## Что Реализовано
-
-Основные артефакты:
-
-| Path | Назначение |
+| Узел | Назначение |
 | --- | --- |
-| `beremiz-project/study-plc/` | Beremiz PLC project |
-| `beremiz-project/direct-raw-plc/` | Beremiz PLC project с raw Ethernet `c_ext` без Modbus |
-| `beremiz-project/supervised-raw-plc/` | Beremiz PLC project для работы под `rt-supervisor` через `/dev/shm` + futex |
-| `device-controller/controller-once.c` | RockPI-side одиночный raw Ethernet request/response tool |
-| `device-controller/controller-loop.c` | RockPI-side циклический request/response tool без GPIO |
-| `device-controller/controller-gpio-loop.c` | RockPI-side GPIO edge -> raw request -> GPIO output loop |
-| `modbus-simulator/modbus_server.py` | Modbus TCP simulator на стандартной библиотеке Python |
-| `modbus-simulator/modbus_client.py` | Утилита чтения/записи Modbus registers |
-| `scripts/sync_to_visionfive.sh` | Передача репозитория на VisionFive 2 через `scp` |
-| `scripts/build_on_visionfive.sh` | Нативная сборка PLC на VisionFive 2 |
-| `scripts/start_runtime_on_visionfive.sh` | Запуск persistent Beremiz runtime на плате |
-| `scripts/deploy_run_on_visionfive_runtime.sh` | Transfer/run PLC в уже запущенный runtime |
-| `scripts/check_runtime_status.py` | Проверка ERPC runtime без чтения runtime logs |
-| `scripts/demo_alarm_toggle.py` | Демонстрация переключения alarm/output |
-| `scripts/demo_direct_raw_ethernet.py` | PC-side проверка direct raw path до появления RockPI |
-| `scripts/configure_rockpi_link_on_visionfive.sh` | Настройка VisionFive `end0` для линка с RockPI |
-| `scripts/start_direct_raw_runtime_on_visionfive.sh` | Запуск Beremiz runtime с `RAW_ETH_INTERFACE=end0` |
-| `scripts/build_supervised_raw_on_visionfive.sh` | Нативная сборка supervised raw PLC на VisionFive 2 |
-| `scripts/deploy_run_supervised_raw_on_visionfive_runtime.sh` | Transfer/run supervised raw PLC в Beremiz runtime |
-| `scripts/install_supervised_runtime_wrapper_on_visionfive.sh` | Установка wrapper, который запускает Beremiz runtime как child `alt-rt-supervisor` |
-| `scripts/start_supervised_stack.sh` | Остановка старых supervised процессов через `kill`, запуск supervisor/controller и применение pinning |
-| `scripts/stop_supervised_stack.sh` | Остановка `controller-emu`, `alt-rt-supervisor` и `Beremiz_service.py` через `kill` по точным PID |
-| `scripts/deploy_controller_to_rockpi.sh` | Передача `device-controller/` на RockPI через VisionFive |
-| `scripts/build_controller_on_rockpi.sh` | Сборка `controller-once`, `controller-loop`, `controller-gpio-loop` на RockPI |
-| `scripts/run_controller_once_on_rockpi.sh` | Проверка одиночного RockPI raw Ethernet exchange |
-| `scripts/run_controller_loop_on_rockpi.sh` | Проверка циклического RockPI raw Ethernet loop без GPIO |
-| `scripts/run_controller_gpio_loop_on_rockpi.sh` | Запуск GPIO-driven RockPI controller loop |
-| `scripts/beremiz_runtime_compat_15.py` | Runtime compatibility layer для Beremiz 1.5 client -> 1.4 runtime |
-| `beremiz-modbus-source-20170318-alt1.noarch.rpm` | Offline RPM с Modbus C sources |
+| ПК | Beremiz IDE/CLI, scripts, GUI monitoring, rt-tester receiver |
+| VisionFive 2 `10.42.0.211` | `alt-rt-supervisor` и Beremiz runtime |
+| RockPI `10.43.0.2` | `controller-emu`, GPIO input/output и raw Ethernet link |
+| Arduino Mega | генерирует GPIO pulses и измеряет задержку ответа |
+
+Сеть:
+
+```text
+ПК 10.42.0.1 <-> VisionFive end1 10.42.0.211
+RockPI end0 10.43.0.2 <-> VisionFive end0 10.43.0.1
+```
+
+## Что Лежит В Репозитории
+
+| Path | Что это |
+| --- | --- |
+| `beremiz-project/supervised-raw-plc/` | единственный Beremiz PLC project |
+| `scripts/sync_to_visionfive.sh` | копирует репозиторий на VisionFive |
+| `scripts/build_supervised_raw_on_visionfive.sh` | собирает PLC на VisionFive |
+| `scripts/start_runtime_on_visionfive.sh` | временно запускает Beremiz runtime для загрузки PLC |
+| `scripts/deploy_run_supervised_raw_on_visionfive_runtime.sh` | загружает PLC в runtime |
+| `scripts/install_supervised_runtime_wrapper_on_visionfive.sh` | ставит wrapper для запуска runtime из supervisor |
+| `scripts/start_supervised_stack.sh` | запускает supervisor на VisionFive и controller на RockPI |
+| `scripts/stop_supervised_stack.sh` | останавливает весь supervised stack |
+| `scripts/sync_supervised_debug_build_from_visionfive.sh` | подтягивает `build/VARIABLES.csv` для GUI-debug |
+| `scripts/check_runtime_status.py` | проверяет `PLC Status` через ERPC |
 
 ## PLC-Логика
 
-В обоих вариантах используется одна и та же учебная логика:
-
-Modbus simulator хранит три holding registers:
-
-| Register | Назначение |
-| --- | --- |
-| `0` | `sensor_value` |
-| `1` | `output_command` |
-| `2` | `threshold` |
-
-`study-plc` каждые `100 ms` читает Modbus registers `0..2`, вычисляет alarm и пишет результат в register `1`. `direct-raw-plc` использует ту же логику, но в измерительном профиле работает с period `T#10ms` и получает входы из raw Ethernet `c_ext`. `supervised-raw-plc` работает с period `T#1ms`, потому что `rt-supervisor` path передает 96 KiB logical message и должен успевать отвечать до Arduino timeout при `measurement-interval-us = 5000`.
+RockPI отправляет в PLC значения `sensor`, `threshold` и `sequence`. PLC считает:
 
 ```iecst
 alarm := sensor_value > threshold;
@@ -154,217 +54,72 @@ ELSE
 END_IF;
 ```
 
-Проверенный сценарий:
+Для текущего controller profile:
 
-```text
-sensor=400, threshold=500 -> alarm=FALSE -> output_command=0
-sensor=600, threshold=500 -> alarm=TRUE  -> output_command=1
-sensor=250, threshold=500 -> alarm=FALSE -> output_command=0
-```
+| GPIO edge | `sensor_value` | `threshold` | `alarm` | `output_command` |
+| --- | --- | --- | --- | --- |
+| rising | `600` | `500` | `TRUE` | `1` |
+| falling | `400` | `500` | `FALSE` | `0` |
 
-В `study-plc` входы/выходы приходят через Modbus registers. В `direct-raw-plc` входы приходят из raw Ethernet request через `c_ext`, а `output_command` отправляется обратно как raw Ethernet response. В `supervised-raw-plc` `c_ext` читает первые `16` bytes из `/dev/shm/shmem_input`, запускает ту же PLC-логику и пишет `BETH v2` response в `/dev/shm/shmem_output`.
+Дополнительные diagnostic counters (`request_count`, `last_sequence`, `high_request_count`, `low_request_count`) нужны для GUI-наблюдения.
 
-## Как Стенд Воссоздан
+## Пакеты
 
-Стенд был собран по шагам:
+Названия пакетов зависят от дистрибутива, но нужны такие компоненты.
 
-1. Создан отдельный репозиторий `beremiz-stand`, чтобы не смешивать материалы с другими RT-проектами.
-2. Проверена сеть ПК <-> VisionFive 2: ПК `10.42.0.1`, плата `10.42.0.211`.
-3. Написан Modbus TCP simulator без внешних Python-зависимостей.
-4. Создан Beremiz project `study-plc` через штатный API `ProjectController.NewProject`.
-5. Добавлены ST-логика PLC и Modbus TCP client configuration.
-6. Подготовлен локальный Modbus C source tree из пакета `beremiz-modbus-source`.
-7. Проект собран на ПК для первичной проверки и на VisionFive 2 для настоящего `riscv64` runtime artifact.
-8. Запущен `Beremiz_service.py` на VisionFive 2 как persistent ERPC runtime.
-9. PLC загружен в runtime через `transfer run`.
-10. Online monitoring с ПК восстановлен через runtime compatibility extension.
-11. Добавлен demo-сценарий, который доказывает, что register `1` меняет именно PLC.
+На ПК:
 
-Практические команды запуска описаны в [GUIDE.md](GUIDE.md).
+- `beremiz` IDE/CLI;
+- `python3`;
+- `openssh-clients`, `scp`, `tar`;
+- для `rt-tester`: `pyserial`, `requests`, `prometheus-client`.
 
-## Что Пришлось Поменять, Чтобы Заработало
+На VisionFive 2:
 
-### Передача На Плату Без Git
+- `python3`, Beremiz runtime/CLI, `matiec`;
+- `gcc`, `make`, стандартные build tools для сборки PLC `.so`;
+- PREEMPT_RT kernel;
+- собранный `/root/rt-supervisor/Build/src/alt-rt-supervisor`.
 
-VisionFive 2 подключен напрямую к ПК через Ethernet. `git clone`/`git pull` на плате нежелателен и может зависать из-за сети/VPN. Поэтому сделан `scripts/sync_to_visionfive.sh`, который передает рабочую копию через `scp`.
+На RockPI:
 
-### Нативная Сборка На VisionFive 2
+- PREEMPT_RT kernel;
+- `libgpiod` v2 runtime;
+- собранный `/root/rt-supervisor/Build/src/controller-emu`.
 
-PLC shared object должен быть `riscv64`, поэтому финальная сборка выполняется на плате:
+Для сборки `rt-supervisor` см. соседний репозиторий `rt-supervisor`: нужен `cmake`, `gcc`, `zlib`, `libgpiod` development headers и явный `-DBOARD=<board>`.
 
-```bash
-scripts/build_on_visionfive.sh
-```
+## Быстрый Запуск
 
-### Modbus C Sources
-
-Beremiz ожидает Modbus C sources через `MODBUS_PATH`. Скрипт `scripts/prepare_modbus_source.sh` копирует `/usr/src/beremiz-modbus` в `.deps/Modbus`, применяет локальную замену `termio.h -> termios.h` и собирает библиотеку.
-
-### Persistent Runtime Вместо Local Runtime
-
-Первичный smoke test запускал local runtime через Beremiz CLI. Для стенда нужен отдельный runtime на плате, поэтому добавлены:
+Подробные команды находятся в [GUIDE.md](GUIDE.md). Короткий порядок:
 
 ```bash
-scripts/start_runtime_on_visionfive.sh
-scripts/stop_runtime_on_visionfive.sh
-scripts/deploy_run_on_visionfive_runtime.sh
-```
-
-Runtime слушает:
-
-```text
-ERPC://10.42.0.211:3000
-```
-
-### Совместимость Beremiz 1.5 И Runtime 1.4
-
-На ПК установлен Beremiz `1.5`, на VisionFive 2 runtime `1.4`. Они различаются в eRPC stubs: поле `log_message.sec` в runtime `1.4` сериализуется как `uint32`, а клиент `1.5` ожидает `uint64`. Из-за этого CLI/IDE падали на `GetLogMessage`.
-
-Исправление сделано без изменения системных файлов `/usr/share/beremiz`: `scripts/start_runtime_on_visionfive.sh` подключает extension `scripts/beremiz_runtime_compat_15.py` через штатный параметр `Beremiz_service.py -e`.
-
-Extension:
-
-- пишет `log_message.sec` как `uint64`;
-- возвращает пустой log tuple вместо `None`;
-- обрабатывает `ConnectionResetError`, чтобы принудительно закрытый CLI/IDE client не оставлял runtime живым, но без RPC thread.
-
-### Project URI Для GUI
-
-`beremiz-project/study-plc/beremiz.xml` теперь хранит:
-
-```text
-ERPC://10.42.0.211:3000
-```
-
-Это позволяет открывать GUI командой:
-
-```bash
-beremiz beremiz-project/study-plc
-```
-
-и подключаться к runtime на VisionFive 2, а не к `LOCAL://`.
-
-### Локальные Secret/State Файлы
-
-Beremiz может создавать `beremiz-project/*/psk/` при ERPC-подключении. Эти файлы не должны попадать в git или переноситься на плату, поэтому они исключены в `.gitignore` и `scripts/sync_to_visionfive.sh`.
-
-## Текущий Проверенный Статус
-
-Базовый Modbus path проверен:
-
-```text
-PLC Status: Started
-Modbus registers: [250, 0, 500]
-```
-
-Demo проходит:
-
-```text
-LOW       -> output_command=0
-HIGH      -> output_command=1
-LOW-AGAIN -> output_command=0
-```
-
-Online monitoring через CLI работает, GUI запускается в графической сессии ПК.
-
-Direct raw RockPI path проверен:
-
-```text
-RockPI end0 -> VisionFive end0 -> Beremiz direct-raw-plc -> response -> RockPI end0
-```
-
-Проверенный вывод на RockPI:
-
-```text
-sent request seq=6101 bytes=1514 sensor=600 threshold=500 forced_output=0
-received response seq=6101 output=1 status=0
-```
-
-Ранее runtime log на VisionFive показывал raw request/response строки:
-
-```text
-direct raw receiver listening on end0, EtherType=0x1122
-direct raw recv request seq=2003 sensor=600 threshold=500 forced_output=0
-direct raw plc seq=2003 sensor=600 threshold=500 forced_output=0 output=1
-direct raw send response seq=2003 output=1 status=0
-```
-
-Циклический RockPI loop без GPIO также проверен: 6 cycles с чередованием `sensor=400/600` вернули outputs `0,1,0,1,0,1`.
-
-GPIO controller собран на RockPI как отдельный target `make controller-gpio-loop`. Измерительный path теперь quiet: штатный per-cycle logging в `controller-gpio-loop` и VisionFive `direct-raw-plc` `c_ext` отключен, чтобы не влиять на timing. Smoke-test запуска без внешнего импульса подтверждает захват `/dev/gpiochip4` lines `6/7` и cleanup отсутствием stale process; полный functional test требует физический edge на input line `6`.
-
-RT profile для измерений:
-
-- RockPI `controller-gpio-loop`: `SCHED_FIFO`, priority `80`, `mlockall(MCL_CURRENT | MCL_FUTURE)`.
-- RockPI GPIO IRQ thread `irq/...-rockpi4-monitor`: `SCHED_FIFO`, priority `99`.
-- VisionFive raw receiver thread: `SCHED_FIFO`, priority `80`, `mlockall(...)`.
-- VisionFive PLC task thread: `SCHED_FIFO`, priority `85`, `mlockall(...)`.
-- `direct-raw-plc` task period: `T#10ms`.
-- Raw Ethernet request/response size: one padded Ethernet frame per direction, `1514 bytes` total (`14` byte Ethernet header + `1500` byte payload). Protocol v2 fields remain in the first `16` payload bytes; the rest is zero padding.
-- При send/timeout error `controller-gpio-loop` оставляет output line `7` без изменения, чтобы Arduino/rt-tester сам зафиксировал отсутствие ожидаемого edge.
-
-Supervised raw RT profile для текущих измерений:
-
-- VisionFive `alt-rt-supervisor`: `SCHED_FIFO 88`, `mlockall(MCL_CURRENT | MCL_FUTURE)`, CPU `1`.
-- VisionFive Beremiz PLC cyclic thread: `SCHED_FIFO 92`, CPU `2`.
-- VisionFive `end0` IRQ: `SCHED_FIFO 82`, CPU `0`.
-- RockPI `controller-emu` RT thread: `SCHED_FIFO 85`, CPU `3`.
-- RockPI GPIO IRQ thread `irq/...-rockpi4-monitor`: `SCHED_FIFO 99`, CPU `3`.
-- RockPI `end0` IRQ: `SCHED_FIFO 75`, CPU `0`.
-- `node_exporter` остается `TS` и закрепляется на housekeeping CPUs.
-- `supervised-raw-plc` task period: `T#1ms`.
-- `rt-supervisor` logical payload: `96 KiB`, fragmented over raw Ethernet, EtherType `0x1122`.
-
-Не запускайте одновременно несколько RockPI controller programs на одном `end0`/EtherType `0x1122`: два raw socket consumers могут конкурировать за response frames. Проверки `controller-once`, `controller-loop` и `controller-gpio-loop` запускаются последовательно.
-
-## Быстрый Старт
-
-Полный порядок действий находится в [GUIDE.md](GUIDE.md).
-
-Минимальный Modbus happy path:
-
-```bash
-python3 modbus-simulator/modbus_server.py --host 0.0.0.0 --port 1502 --verbose
-```
-
-В другом терминале:
-
-```bash
-scripts/sync_to_visionfive.sh
-scripts/build_on_visionfive.sh
-scripts/start_runtime_on_visionfive.sh
-scripts/deploy_run_on_visionfive_runtime.sh
-/usr/bin/python3 scripts/demo_alarm_toggle.py
-beremiz beremiz-project/study-plc
-```
-
-Минимальный direct raw RockPI path после синхронизации проекта:
-
-```bash
-scripts/configure_rockpi_link_on_visionfive.sh
-scripts/build_direct_raw_on_visionfive.sh
-scripts/stop_runtime_on_visionfive.sh root@10.42.0.211 /root/beremiz-runtime/direct-raw-plc
-scripts/start_direct_raw_runtime_on_visionfive.sh root@10.42.0.211 end0
-scripts/deploy_run_direct_raw_on_visionfive_runtime.sh
-ssh root@10.42.0.211 'ssh root@10.43.0.2 "cd /root/device-controller && ./controller-once -i end0 --sequence 2003 --sensor 600 --threshold 500 --forced-output 0 --timeout-ms 2000"'
-```
-
-Минимальный supervised raw path через `rt-supervisor` после сборки `rt-supervisor` на VisionFive и RockPI:
-
-```bash
+scripts/stop_supervised_stack.sh
 scripts/sync_to_visionfive.sh
 scripts/build_supervised_raw_on_visionfive.sh
+scripts/start_runtime_on_visionfive.sh
+scripts/deploy_run_supervised_raw_on_visionfive_runtime.sh
 scripts/install_supervised_runtime_wrapper_on_visionfive.sh
-scripts/start_supervised_stack.sh
+scripts/stop_runtime_on_visionfive.sh
+TIMEOUT_US=30000000 scripts/start_supervised_stack.sh
+scripts/sync_supervised_debug_build_from_visionfive.sh
+/usr/bin/python3 scripts/check_runtime_status.py ERPC://10.42.0.211:3000
 ```
 
-`start_supervised_stack.sh` сначала вызывает `stop_supervised_stack.sh`: старые `controller-emu`, `alt-rt-supervisor` и `Beremiz_service.py` ищутся по точным PID и завершаются через `kill`, затем при необходимости через `kill -KILL`. `pkill -f` намеренно не используется.
-
-Минимальная проверка перед запуском `rt-tester`:
+После этого можно открывать GUI:
 
 ```bash
-ssh root@10.42.0.211 'cat /sys/devices/system/cpu/isolated; cat /sys/devices/system/cpu/nohz_full'
-ssh root@10.42.0.211 'ssh root@10.43.0.2 "cat /sys/devices/system/cpu/isolated; cat /sys/devices/system/cpu/nohz_full"'
-ssh root@10.42.0.211 'ps -eLo pid,tid,cls,rtprio,psr,comm,args | grep -E "[a]lt-rt-supervisor|[B]eremiz_service.py|irq/.+-end0"'
-ssh root@10.42.0.211 'ssh root@10.43.0.2 "ps -eLo pid,tid,cls,rtprio,psr,comm,args | grep -E \"[c]ontroller-emu|irq/.+-rockpi4-monitor|irq/.+-end0|[n]ode_exporter\""'
+beremiz beremiz-project/supervised-raw-plc
 ```
+
+Runtime URI:
+
+```text
+ERPC://10.42.0.211:3000
+```
+
+## Важно
+
+- Для GUI/debug запускайте stack с `TIMEOUT_US=30000000`, иначе supervisor может перезапустить runtime во время polling.
+- После каждой сборки PLC на VisionFive выполняйте `scripts/sync_supervised_debug_build_from_visionfive.sh`, иначе GUI не найдет локальный `build/VARIABLES.csv`.
+- `alarm` меняется не от GUI и не от receiver, а от GPIO edges, которые RockPI получает на input line.
