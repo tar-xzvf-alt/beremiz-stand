@@ -266,6 +266,22 @@ cd /home/taranev/work_repos/rt/rt-tester/src/pc-receiver
 python3 receiver.py --params measurement.conf --start --exit-on-stop
 ```
 
+Короткий supervised smoke на 3 группы можно запускать из этого проекта:
+
+```bash
+scripts/run_supervised_smoke.sh
+```
+
+Скрипт заново запускает supervised stack с `TIMEOUT_US=30000000`, проверяет
+процессы/RT priorities/shared memory через `scripts/check_supervised_stack.sh`,
+запускает `rt-tester` receiver с
+`src/pc-receiver/measurement-supervised-smoke.conf` и печатает summary из
+SQLite DB. Если stack уже запущен и его не нужно перезапускать:
+
+```bash
+SKIP_START=1 scripts/run_supervised_smoke.sh
+```
+
 Для ручного режима можно запустить без `--start --exit-on-stop` и вводить
 `start`, `status`, `events`, `stop`, `exit` в интерактивной консоли.
 
