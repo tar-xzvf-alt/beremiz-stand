@@ -20,9 +20,9 @@ RUNTIME_WRAPPER=$2
 INTERFACE=$3
 TIMEOUT_US=$4
 
-rm -f /dev/shm/shmem_input /dev/shm/shmem_output
 : > /root/alt-rt-supervisor.log
-nohup "$SUPERVISOR_BIN" -i "$INTERFACE" -t "$TIMEOUT_US" -r "$RUNTIME_WRAPPER" \
+nohup /root/rt-supervisor/scripts/run_supervisor.sh \
+	"$INTERFACE" "$TIMEOUT_US" "$RUNTIME_WRAPPER" "$SUPERVISOR_BIN" \
 	>/root/alt-rt-supervisor.log 2>&1 &
 echo "alt-rt-supervisor pid=$!"
 VISIONFIVE_REMOTE
@@ -33,7 +33,8 @@ CONTROLLER_BIN=$1
 INTERFACE=$2
 
 : > /root/controller-emu.log
-nohup "$CONTROLLER_BIN" -i "$INTERFACE" >/root/controller-emu.log 2>&1 &
+nohup /root/rt-supervisor/scripts/run_controller.sh \
+	"$INTERFACE" "$CONTROLLER_BIN" >/root/controller-emu.log 2>&1 &
 echo "controller-emu pid=$!"
 ROCKPI_REMOTE
 

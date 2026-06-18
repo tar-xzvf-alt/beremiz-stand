@@ -42,6 +42,13 @@ RockPI end0 10.43.0.2 <-> VisionFive end0 10.43.0.1
 
 `rt-supervisor` находится здесь: https://altlinux.space/besogon1238/rt-supervisor
 
+Полезные разделы `rt-supervisor`:
+
+- `docs/runtime-abi.md`: shared memory/futex contract между supervisor и runtime;
+- `docs/boards.md`: GPIO profiles и добавление новых плат;
+- `docs/altlinux-packages.md`: проверенные пакеты ALT Linux;
+- `docs/beremiz-runtime.md`: запуск Beremiz runtime через `alt-rt-supervisor -r`.
+
 ## PLC-Логика
 
 RockPI отправляет в PLC значения `sensor`, `threshold` и `sequence`. PLC считает:
@@ -87,7 +94,7 @@ apt-get install beremiz matiec python3 openssh-clients openssh-server tar git gc
 apt-get install python3 openssh-clients openssh-server tar git gcc make binutils glibc-devel cmake zlib-devel libgpiod-devel kernel-image-rt
 ```
 
-`rt-supervisor` собирается отдельно из https://altlinux.space/besogon1238/rt-supervisor. Для этого нужны `cmake`, `gcc`, `zlib-devel`, `libgpiod-devel` и явный board, например `cmake -B Build -DBOARD=repkapi4`.
+`rt-supervisor` собирается отдельно из https://altlinux.space/besogon1238/rt-supervisor. Точные пакеты и board profiles описаны в `docs/altlinux-packages.md` и `docs/boards.md` этого репозитория.
 
 ## Быстрый Запуск
 
@@ -121,6 +128,7 @@ ERPC://10.42.0.211:3000
 ## Важно
 
 - Для GUI/debug запускайте stack с `TIMEOUT_US=30000000`, иначе supervisor может перезапустить runtime во время polling.
-- Вручную supervisor запускается на VisionFive так: `/root/rt-supervisor/Build/src/alt-rt-supervisor -i end0 -t 30000000 -r /root/beremiz-runtime/supervised-raw-plc/start_runtime.sh`.
+- Вручную supervisor запускается на VisionFive так: `/root/rt-supervisor/scripts/run_supervisor.sh end0 30000000 /root/beremiz-runtime/supervised-raw-plc/start_runtime.sh /root/rt-supervisor/Build/src/alt-rt-supervisor`.
+- Вручную controller запускается на RockPI так: `/root/rt-supervisor/scripts/run_controller.sh end0 /root/rt-supervisor/Build/src/controller-emu`.
 - После каждой сборки PLC на VisionFive выполняйте `scripts/sync_supervised_debug_build_from_visionfive.sh`, иначе GUI не найдет локальный `build/VARIABLES.csv`.
 - `alarm` меняется не от GUI и не от receiver, а от GPIO edges, которые RockPI получает на input line.

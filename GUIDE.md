@@ -24,6 +24,18 @@ ssh root@10.42.0.211 'ssh root@10.43.0.2 true'
 
 Исходники `rt-supervisor`: https://altlinux.space/besogon1238/rt-supervisor
 
+В этом стенде используются два режима `rt-supervisor`:
+
+- `managed-runtime` на VisionFive: supervisor запускает Beremiz runtime через `-r`;
+- `hardware-controller` на RockPI: `controller-emu` переводит GPIO edges в raw Ethernet requests.
+
+Подробнее:
+
+- `docs/runtime-abi.md`: shared memory/futex ABI;
+- `docs/boards.md`: GPIO mappings и board names;
+- `docs/altlinux-packages.md`: пакеты ALT Linux;
+- `docs/beremiz-runtime.md`: Beremiz wrapper и ручные команды запуска.
+
 На платах должны быть уже собраны:
 
 ```text
@@ -135,20 +147,29 @@ scripts/start_supervised_stack.sh
 - `controller-emu` на RockPI;
 - RT priorities и CPU affinity через pinning scripts.
 
+Внутри он использует новые wrappers из `rt-supervisor`:
+
+```text
+/root/rt-supervisor/scripts/run_supervisor.sh
+/root/rt-supervisor/scripts/run_controller.sh
+```
+
 Если нужно запустить именно supervisor вручную на VisionFive, команда такая:
 
 ```bash
-rm -f /dev/shm/shmem_input /dev/shm/shmem_output
-/root/rt-supervisor/Build/src/alt-rt-supervisor \
-  -i end0 \
-  -t 30000000 \
-  -r /root/beremiz-runtime/supervised-raw-plc/start_runtime.sh
+/root/rt-supervisor/scripts/run_supervisor.sh \
+  end0 \
+  30000000 \
+  /root/beremiz-runtime/supervised-raw-plc/start_runtime.sh \
+  /root/rt-supervisor/Build/src/alt-rt-supervisor
 ```
 
-Здесь `-r` указывает wrapper Beremiz runtime, который supervisor запускает и перезапускает при watchdog timeout. Для запуска всего стенда вручную дополнительно нужен controller на RockPI:
+Этот wrapper удаляет старые `/dev/shm/shmem_input` и `/dev/shm/shmem_output`, затем запускает `alt-rt-supervisor -i end0 -t 30000000 -r ...`. Для запуска всего стенда вручную дополнительно нужен controller на RockPI:
 
 ```bash
-/root/rt-supervisor/Build/src/controller-emu -i end0
+/root/rt-supervisor/scripts/run_controller.sh \
+  end0 \
+  /root/rt-supervisor/Build/src/controller-emu
 ```
 
 Проверка:
