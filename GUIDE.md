@@ -475,6 +475,12 @@ PLC Status: Started
 scripts/start_supervised_stack.sh
 ```
 
+Для GUI/debug-наблюдения используйте более длинный watchdog timeout, чтобы supervisor не перезапускал Beremiz runtime во время eRPC/debugger polling:
+
+```bash
+TIMEOUT_US=30000000 scripts/start_supervised_stack.sh
+```
+
 Этот скрипт:
 
 - останавливает старые `controller-emu`, `alt-rt-supervisor` и `Beremiz_service.py` через `kill` по точным PID;
@@ -492,7 +498,33 @@ scripts/stop_supervised_stack.sh
 
 Functional проверка требует GPIO pulses от Arduino/rt-tester или контролируемый edge на RockPI input line `6`.
 
-### 13.4. Проверки
+### 13.4. Online Monitoring В Beremiz GUI
+
+Supervised PLC собирается на VisionFive, поэтому после build/deploy локальному GUI нужны debug-артефакты из remote `build/`. Без них Beremiz подключается к ERPC, но не может открыть `build/VARIABLES.csv` и сообщает, что отлаживаемая программа не соответствует программе в PLC.
+
+Синхронизируйте debug build на ПК:
+
+```bash
+scripts/sync_supervised_debug_build_from_visionfive.sh
+```
+
+Откройте GUI:
+
+```bash
+beremiz beremiz-project/supervised-raw-plc
+```
+
+Подключитесь к runtime `ERPC://10.42.0.211:3000` и включите online/debug view для `plc_prg`. Ожидаемый признак корректного соответствия проекта runtime: `Latest build matches with connected target` / `Debugger ready`.
+
+Если GUI подключается, но затем polling обрывается, проверьте, что supervised stack был запущен с увеличенным timeout:
+
+```bash
+ssh root@10.42.0.211 'pgrep -af alt-rt-supervisor'
+```
+
+В аргументах должно быть `-t 30000000` или больше.
+
+### 13.5. Проверки
 
 Shared memory slots на VisionFive:
 

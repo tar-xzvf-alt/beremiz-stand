@@ -7,7 +7,7 @@ SUPERVISOR_BIN=${3:-/root/rt-supervisor/Build/src/alt-rt-supervisor}
 CONTROLLER_BIN=${4:-/root/rt-supervisor/Build/src/controller-emu}
 RUNTIME_WRAPPER=${5:-/root/beremiz-runtime/supervised-raw-plc/start_runtime.sh}
 INTERFACE=${6:-end0}
-TIMEOUT_US=${7:-5000000}
+TIMEOUT_US=${TIMEOUT_US:-${7:-5000000}}
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
