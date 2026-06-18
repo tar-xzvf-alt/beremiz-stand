@@ -282,6 +282,12 @@ SQLite DB. Если stack уже запущен и его не нужно пер
 SKIP_START=1 scripts/run_supervised_smoke.sh
 ```
 
+Количество групп smoke можно изменить без правки config:
+
+```bash
+SMOKE_GROUPS=10 scripts/run_supervised_smoke.sh
+```
+
 Для ручного режима можно запустить без `--start --exit-on-stop` и вводить
 `start`, `status`, `events`, `stop`, `exit` в интерактивной консоли.
 

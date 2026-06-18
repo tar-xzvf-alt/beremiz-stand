@@ -6,6 +6,7 @@ ROCKPI=${ROCKPI:-${2:-root@10.43.0.2}}
 RT_TESTER_DIR=${RT_TESTER_DIR:-/home/taranev/work_repos/rt/rt-tester}
 ARDUINO_PORT=${ARDUINO_PORT:-/dev/ttyACM0}
 RECEIVER_TIMEOUT_SEC=${RECEIVER_TIMEOUT_SEC:-120}
+SMOKE_GROUPS=${SMOKE_GROUPS:-3}
 SKIP_START=${SKIP_START:-0}
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -32,15 +33,16 @@ param_value()
 }
 
 SMOKE_DB=$(param_value db)
-EXPECTED_GROUPS=$(param_value auto-stop-groups)
+EXPECTED_GROUPS=$SMOKE_GROUPS
 
 if [ -z "$SMOKE_DB" ]; then
 	echo "Smoke params do not define db" >&2
 	exit 1
 fi
 
-if [ -z "$EXPECTED_GROUPS" ]; then
-	EXPECTED_GROUPS=3
+if [ "$SMOKE_GROUPS" -lt 1 ]; then
+	echo "SMOKE_GROUPS must be >= 1" >&2
+	exit 1
 fi
 
 if [ "$SKIP_START" != 1 ]; then
@@ -61,6 +63,7 @@ rm -f "$SMOKE_DB" "$SMOKE_DB-shm" "$SMOKE_DB-wal"
 	timeout "${RECEIVER_TIMEOUT_SEC}s" python3 receiver.py \
 		--params "$SMOKE_PARAMS" \
 		--port "$ARDUINO_PORT" \
+		--groups "$SMOKE_GROUPS" \
 		--start \
 		--exit-on-stop
 )
