@@ -12,6 +12,7 @@ CONTROLLER_BIN=${CONTROLLER_BIN:-/root/rt-supervisor/Build/src/controller-emu}
 SESSION_ID=${SESSION_ID:-}
 TRACE_PROMETHEUS_URL=${TRACE_PROMETHEUS_URL:-}
 TRACE_PROMETHEUS_SETTLE_SEC=${TRACE_PROMETHEUS_SETTLE_SEC:-2}
+TRACE_MODE=${TRACE_MODE:-}
 SKIP_START=${SKIP_START:-0}
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -41,6 +42,14 @@ SMOKE_DB=$(param_value db)
 MEASUREMENTS_PER_GROUP=$(param_value measurements-per-group)
 EXPECTED_GROUPS=$SMOKE_GROUPS
 
+if [ -z "$TRACE_MODE" ]; then
+	if [ -n "$TRACE_PROMETHEUS_URL" ]; then
+		TRACE_MODE=prometheus
+	else
+		TRACE_MODE=off
+	fi
+fi
+
 if [ -z "$SESSION_ID" ]; then
 	SESSION_ID=$(python3 - <<'PY'
 import random
@@ -64,14 +73,40 @@ if [ -z "$MEASUREMENTS_PER_GROUP" ]; then
 	exit 1
 fi
 
+case "$TRACE_MODE" in
+off)
+	START_TRACE_SESSION_ID=-
+	START_TRACE_EXPORTERS=0
+	;;
+jsonl)
+	START_TRACE_SESSION_ID=$SESSION_ID
+	START_TRACE_EXPORTERS=0
+	;;
+prometheus)
+	if [ -z "$TRACE_PROMETHEUS_URL" ]; then
+		echo "TRACE_MODE=prometheus requires TRACE_PROMETHEUS_URL" >&2
+		exit 1
+	fi
+	START_TRACE_SESSION_ID=$SESSION_ID
+	START_TRACE_EXPORTERS=1
+	;;
+*)
+	echo "TRACE_MODE must be off, jsonl, or prometheus" >&2
+	exit 1
+	;;
+esac
+
 if [ "$SKIP_START" != 1 ]; then
 	echo "== Start supervised stack =="
-	RT_TRACE_SESSION_ID="$SESSION_ID" \
+	RT_TRACE_SESSION_ID="$START_TRACE_SESSION_ID" \
 	RT_TRACE_MEASUREMENTS_PER_GROUP="$MEASUREMENTS_PER_GROUP" \
+	RT_TRACE_EXPORTERS="$START_TRACE_EXPORTERS" \
 		TIMEOUT_US=30000000 "$SCRIPT_DIR/start_supervised_stack.sh" \
 		"$VISIONFIVE" "$ROCKPI" "$SUPERVISOR_BIN" "$CONTROLLER_BIN"
 	echo
 fi
+
+echo "trace_mode=$TRACE_MODE"
 
 echo "== Check supervised stack =="
 "$SCRIPT_DIR/check_supervised_stack.sh" "$VISIONFIVE" "$ROCKPI"
@@ -90,7 +125,7 @@ rm -f "$SMOKE_DB" "$SMOKE_DB-shm" "$SMOKE_DB-wal"
 		--exit-on-stop
 )
 
-if [ -n "$TRACE_PROMETHEUS_URL" ]; then
+if [ "$TRACE_MODE" = prometheus ]; then
 	echo
 	echo "== Import trace metrics =="
 	sleep "$TRACE_PROMETHEUS_SETTLE_SEC"

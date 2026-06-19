@@ -65,6 +65,14 @@ except Exception as exc:
 PY
 }
 
+check_optional_http()
+{
+	url=$1
+	if ! check_http "$url"; then
+		echo "warning: $url is not ready yet" >&2
+	fi
+}
+
 if [ ! -x "$PROMETHEUS_BIN" ]; then
 	echo "Prometheus binary not found: $PROMETHEUS_BIN" >&2
 	exit 1
@@ -108,8 +116,8 @@ if [ ! -f "$PROM_PID" ]; then
 	echo "trace Prometheus pid=$pid addr=$TRACE_PROMETHEUS_ADDR"
 fi
 
-check_http "http://127.0.0.1:$VISIONFIVE_TUNNEL_PORT/metrics"
-check_http "http://127.0.0.1:$ROCKPI_TUNNEL_PORT/metrics"
 check_http "http://$TRACE_PROMETHEUS_ADDR/-/ready"
+check_optional_http "http://127.0.0.1:$VISIONFIVE_TUNNEL_PORT/metrics"
+check_optional_http "http://127.0.0.1:$ROCKPI_TUNNEL_PORT/metrics"
 
 echo "TRACE_PROMETHEUS_URL=http://$TRACE_PROMETHEUS_ADDR"

@@ -12,6 +12,7 @@ RT_TRACE_SESSION_ID=${RT_TRACE_SESSION_ID:-}
 RT_TRACE_MEASUREMENTS_PER_GROUP=${RT_TRACE_MEASUREMENTS_PER_GROUP:-}
 RT_TRACE_SUPERVISOR_PATH=${RT_TRACE_SUPERVISOR_PATH:-/tmp/rt-supervisor-trace.jsonl}
 RT_TRACE_CONTROLLER_PATH=${RT_TRACE_CONTROLLER_PATH:-/tmp/controller-emu-trace.jsonl}
+RT_TRACE_EXPORTERS=${RT_TRACE_EXPORTERS:-1}
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
@@ -19,7 +20,7 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
 ssh "$VISIONFIVE" sh -s -- "$SUPERVISOR_BIN" "$RUNTIME_WRAPPER" \
 	"$INTERFACE" "$TIMEOUT_US" "$RT_TRACE_SESSION_ID" \
-	"$RT_TRACE_SUPERVISOR_PATH" <<'VISIONFIVE_REMOTE'
+	"$RT_TRACE_SUPERVISOR_PATH" "$RT_TRACE_EXPORTERS" <<'VISIONFIVE_REMOTE'
 set -eu
 SUPERVISOR_BIN=$1
 RUNTIME_WRAPPER=$2
@@ -27,11 +28,16 @@ INTERFACE=$3
 TIMEOUT_US=$4
 TRACE_SESSION_ID=$5
 TRACE_PATH=$6
+TRACE_EXPORTERS=${7:-0}
+
+if [ "$TRACE_SESSION_ID" = - ]; then
+	TRACE_SESSION_ID=
+fi
 
 : > /root/alt-rt-supervisor.log
 if [ -n "$TRACE_SESSION_ID" ]; then
 	: > "$TRACE_PATH"
-	if [ -x /root/rt-supervisor/scripts/trace_exporter.py ]; then
+	if [ "$TRACE_EXPORTERS" = 1 ] && [ -x /root/rt-supervisor/scripts/trace_exporter.py ]; then
 		nohup /root/rt-supervisor/scripts/trace_exporter.py \
 			--listen 0.0.0.0 --port 9201 "$TRACE_PATH" \
 			>/root/rt-trace-exporter.log 2>&1 &
@@ -48,18 +54,23 @@ fi
 echo "alt-rt-supervisor pid=$!"
 VISIONFIVE_REMOTE
 
-ssh "$VISIONFIVE" "ssh '$ROCKPI' sh -s -- '$CONTROLLER_BIN' '$INTERFACE' '$RT_TRACE_SESSION_ID' '$RT_TRACE_MEASUREMENTS_PER_GROUP' '$RT_TRACE_CONTROLLER_PATH'" <<'ROCKPI_REMOTE'
+ssh "$VISIONFIVE" "ssh '$ROCKPI' sh -s -- '$CONTROLLER_BIN' '$INTERFACE' '$RT_TRACE_SESSION_ID' '$RT_TRACE_MEASUREMENTS_PER_GROUP' '$RT_TRACE_CONTROLLER_PATH' '$RT_TRACE_EXPORTERS'" <<'ROCKPI_REMOTE'
 set -eu
 CONTROLLER_BIN=$1
 INTERFACE=$2
 TRACE_SESSION_ID=$3
 TRACE_MPG=$4
 TRACE_PATH=$5
+TRACE_EXPORTERS=${6:-0}
+
+if [ "$TRACE_SESSION_ID" = - ]; then
+	TRACE_SESSION_ID=
+fi
 
 : > /root/controller-emu.log
 if [ -n "$TRACE_SESSION_ID" ] && [ -n "$TRACE_MPG" ]; then
 	: > "$TRACE_PATH"
-	if [ -x /root/rt-supervisor/scripts/trace_exporter.py ]; then
+	if [ "$TRACE_EXPORTERS" = 1 ] && [ -x /root/rt-supervisor/scripts/trace_exporter.py ]; then
 		nohup /root/rt-supervisor/scripts/trace_exporter.py \
 			--listen 0.0.0.0 --port 9201 "$TRACE_PATH" \
 			>/root/rt-trace-exporter.log 2>&1 &

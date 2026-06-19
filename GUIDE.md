@@ -288,6 +288,9 @@ SKIP_START=1 scripts/run_supervised_smoke.sh
 SMOKE_GROUPS=10 scripts/run_supervised_smoke.sh
 ```
 
+Точный протокол sanity, trace и A/B overhead тестов описан в
+`TEST_PROTOCOL.md`.
+
 Trace-разбивка по стадиям включается тем же smoke script. Он передаёт один
 `SESSION_ID` в receiver, supervisor и controller, а controller добавляет в BETH
 payload `session_id`, `group_index` и `measurements-per-group`. На платах
@@ -304,7 +307,9 @@ VisionFive trace exporter: 10.43.0.1:9201
 после smoke:
 
 ```bash
-TRACE_PROMETHEUS_URL=http://localhost:9090 scripts/run_supervised_smoke.sh
+TRACE_MODE=prometheus \
+TRACE_PROMETHEUS_URL=http://localhost:9090 \
+  scripts/run_supervised_smoke.sh
 ```
 
 Если ПК не имеет маршрута в сеть `10.43.0.0/24`, используйте SSH tunnels из
@@ -312,7 +317,23 @@ TRACE_PROMETHEUS_URL=http://localhost:9090 scripts/run_supervised_smoke.sh
 
 ```bash
 scripts/start_trace_prometheus_local.sh
-TRACE_PROMETHEUS_URL=http://127.0.0.1:9091 scripts/run_supervised_smoke.sh
+TRACE_MODE=prometheus \
+TRACE_PROMETHEUS_URL=http://127.0.0.1:9091 \
+  scripts/run_supervised_smoke.sh
+scripts/stop_trace_prometheus_local.sh
+```
+
+Для baseline без trace используйте:
+
+```bash
+TRACE_MODE=off scripts/run_supervised_smoke.sh
+```
+
+Для проверки overhead сразу в трех режимах:
+
+```bash
+scripts/start_trace_prometheus_local.sh
+AB_GROUPS=2 AB_REPEATS=1 scripts/run_supervised_ab_overhead.sh
 scripts/stop_trace_prometheus_local.sh
 ```
 
