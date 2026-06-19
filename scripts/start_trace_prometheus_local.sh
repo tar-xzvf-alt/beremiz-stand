@@ -68,8 +68,17 @@ PY
 check_optional_http()
 {
 	url=$1
-	if ! check_http "$url"; then
-		echo "warning: $url is not ready yet" >&2
+	if ! python3 - "$url" <<'PY'
+import sys
+import urllib.request
+
+try:
+    urllib.request.urlopen(sys.argv[1], timeout=5).read(1)
+except Exception:
+    raise SystemExit(1)
+PY
+	then
+		echo "trace exporter is not ready at $url; normal before smoke starts" >&2
 	fi
 }
 

@@ -146,6 +146,12 @@ AB_GROUPS=10 AB_REPEATS=5 scripts/run_supervised_ab_overhead.sh
 1-prometheus: trace_mode=prometheus; session=...; groups=...; latencies=...; latency_min_avg_max_us=...; Imported trace metrics: ...
 ```
 
+Для компактной таблицы по сохраненным логам:
+
+```bash
+scripts/summarize_ab_overhead.py /tmp/rt-supervised-ab-YYYYMMDD-HHMMSS
+```
+
 Интерпретация:
 
 - сравнивайте `latency_min_avg_max_us` между `off`, `jsonl`, `prometheus`;
