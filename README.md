@@ -99,7 +99,10 @@ apt-get install python3 openssh-clients openssh-server tar git gcc make binutils
 
 ## Быстрый Запуск
 
-Подробные команды находятся в [GUIDE.md](GUIDE.md). Короткий порядок:
+Для обычного пользователя сначала смотрите [QUICKSTART.md](QUICKSTART.md): там
+описан запуск через единый `scripts/stand.py`.
+
+Подробные ручные команды находятся в [GUIDE.md](GUIDE.md). Короткий порядок:
 
 ```bash
 scripts/stop_supervised_stack.sh

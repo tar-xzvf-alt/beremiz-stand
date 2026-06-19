@@ -1,0 +1,427 @@
+#!/usr/bin/env python3
+import argparse
+import configparser
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import urllib.request
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_PROFILE = ROOT / "profiles" / "visionfive-rockpi.conf"
+VALID_BOARDS = {
+    "lichee",
+    "radxa",
+    "bcvm",
+    "bvc",
+    "bvc_arm",
+    "starfive",
+    "mangopi",
+    "rockpi4",
+    "repkapi4",
+}
+
+
+class StandError(Exception):
+    pass
+
+
+def load_profile(path: Path) -> configparser.ConfigParser:
+    cfg = configparser.ConfigParser()
+    if not path.is_file():
+        raise StandError(f"profile not found: {path}")
+    cfg.read(path)
+    for section in ("pc", "supervisor", "controller", "measurement"):
+        if not cfg.has_section(section):
+            raise StandError(f"profile is missing [{section}]")
+    return cfg
+
+
+def get(cfg: configparser.ConfigParser, section: str, key: str) -> str:
+    value = cfg.get(section, key, fallback="").strip()
+    if not value:
+        raise StandError(f"profile value is missing: [{section}] {key}")
+    return value
+
+
+def opt(cfg: configparser.ConfigParser, section: str, key: str, default: str) -> str:
+    return cfg.get(section, key, fallback=default).strip() or default
+
+
+def run(cmd: list[str], env: dict[str, str] | None = None, check: bool = True) -> int:
+    merged_env = os.environ.copy()
+    if env:
+        merged_env.update(env)
+    print("+ " + " ".join(cmd), flush=True)
+    completed = subprocess.run(cmd, cwd=ROOT, env=merged_env, check=False)
+    if check and completed.returncode != 0:
+        raise StandError(f"command failed with exit code {completed.returncode}")
+    return completed.returncode
+
+
+def capture(cmd: list[str], timeout: int = 10) -> tuple[int, str]:
+    try:
+        completed = subprocess.run(
+            cmd,
+            cwd=ROOT,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return 124, exc.stdout or "timeout"
+    return completed.returncode, completed.stdout.strip()
+
+
+def script(name: str) -> str:
+    return str(ROOT / "scripts" / name)
+
+
+def supervisor(cfg: configparser.ConfigParser) -> str:
+    return get(cfg, "supervisor", "ssh")
+
+
+def controller(cfg: configparser.ConfigParser) -> str:
+    return get(cfg, "controller", "ssh")
+
+
+def smoke_env(
+    cfg: configparser.ConfigParser,
+    args: argparse.Namespace,
+    trace_mode: str,
+    params_path: Path,
+) -> dict[str, str]:
+    env = {
+        "RT_TESTER_DIR": get(cfg, "pc", "rt_tester_dir"),
+        "ARDUINO_PORT": args.arduino_port or get(cfg, "pc", "arduino_port"),
+        "SMOKE_GROUPS": str(args.groups or get(cfg, "measurement", "groups")),
+        "SMOKE_PARAMS": str(params_path),
+        "SUPERVISOR_BIN": get(cfg, "supervisor", "supervisor_bin"),
+        "CONTROLLER_BIN": get(cfg, "controller", "controller_bin"),
+        "RECEIVER_TIMEOUT_SEC": str(
+            args.receiver_timeout_sec
+            or opt(cfg, "measurement", "receiver_timeout_sec", "120")
+        ),
+        "TRACE_MODE": trace_mode,
+    }
+    if trace_mode == "prometheus":
+        env["TRACE_PROMETHEUS_URL"] = get(cfg, "pc", "trace_prometheus_url")
+    return env
+
+
+def read_params(path: Path) -> list[str]:
+    if not path.is_file():
+        raise StandError(f"measurement params not found: {path}")
+    return path.read_text(encoding="utf-8").splitlines()
+
+
+def write_param(lines: list[str], key: str, value: str) -> list[str]:
+    out: list[str] = []
+    found = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and stripped.split("=", 1)[0].strip() == key:
+            out.append(f"{key} = {value}")
+            found = True
+        else:
+            out.append(line)
+    if not found:
+        out.append(f"{key} = {value}")
+    return out
+
+
+def temp_params(cfg: configparser.ConfigParser, args: argparse.Namespace) -> object | None:
+    src = Path(get(cfg, "measurement", "params"))
+    interval_us = args.interval_us or opt(cfg, "measurement", "interval_us", "")
+    measurements_per_group = args.measurements_per_group or opt(
+        cfg, "measurement", "measurements_per_group", ""
+    )
+    overrides: list[tuple[str, str]] = []
+    if interval_us:
+        overrides.append(("measurement-interval-us", str(interval_us)))
+    if measurements_per_group:
+        overrides.append(("measurements-per-group", str(measurements_per_group)))
+    if not overrides:
+        return None
+
+    lines = read_params(src)
+    for key, value in overrides:
+        lines = write_param(lines, key, value)
+
+    tmp = tempfile.NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        prefix="rt-stand-measurement-",
+        suffix=".conf",
+        delete=False,
+    )
+    tmp.write("\n".join(lines) + "\n")
+    tmp.flush()
+    tmp.close()
+    return tmp
+
+
+def params_for_run(cfg: configparser.ConfigParser, args: argparse.Namespace) -> tuple[Path, str | None]:
+    tmp = temp_params(cfg, args)
+    if tmp is None:
+        return Path(get(cfg, "measurement", "params")), None
+    return Path(tmp.name), tmp.name
+
+
+def cleanup_temp(path: str | None) -> None:
+    if path:
+        try:
+            Path(path).unlink()
+        except FileNotFoundError:
+            pass
+
+
+def cmd_start(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
+    return run(
+        [
+            script("start_supervised_stack.sh"),
+            supervisor(cfg),
+            controller(cfg),
+            get(cfg, "supervisor", "supervisor_bin"),
+            get(cfg, "controller", "controller_bin"),
+            get(cfg, "supervisor", "runtime_wrapper"),
+            get(cfg, "supervisor", "iface"),
+        ]
+    )
+
+
+def cmd_stop(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
+    return run([script("stop_supervised_stack.sh"), supervisor(cfg), controller(cfg)])
+
+
+def cmd_check(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
+    env = {"ERPC_URL": get(cfg, "supervisor", "erpc_url")}
+    return run([script("check_supervised_stack.sh"), supervisor(cfg), controller(cfg)], env=env)
+
+
+def cmd_trace_start(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
+    env = {
+        "VISIONFIVE": supervisor(cfg),
+        "RT_TESTER_DIR": get(cfg, "pc", "rt_tester_dir"),
+        "TRACE_PROMETHEUS_ADDR": get(cfg, "pc", "trace_prometheus_addr"),
+    }
+    return run([script("start_trace_prometheus_local.sh")], env=env)
+
+
+def cmd_trace_stop(_cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
+    return run([script("stop_trace_prometheus_local.sh")])
+
+
+def cmd_grafana_start(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
+    host, port = get(cfg, "pc", "trace_grafana_addr").rsplit(":", 1)
+    env = {
+        "RT_TESTER_DIR": get(cfg, "pc", "rt_tester_dir"),
+        "TRACE_GRAFANA_ADDR": host,
+        "TRACE_GRAFANA_PORT": port,
+    }
+    return run([script("start_trace_grafana_local.sh")], env=env)
+
+
+def cmd_grafana_stop(_cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
+    return run([script("stop_trace_grafana_local.sh")])
+
+
+def cmd_test_smoke(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
+    params, tmp_path = params_for_run(cfg, args)
+    try:
+        env = smoke_env(cfg, args, "off", params)
+        return run([script("run_supervised_smoke.sh"), supervisor(cfg), controller(cfg)], env=env)
+    finally:
+        cleanup_temp(tmp_path)
+
+
+def cmd_test_trace(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
+    params, tmp_path = params_for_run(cfg, args)
+    try:
+        if not args.no_trace_start:
+            cmd_trace_start(cfg, args)
+        env = smoke_env(cfg, args, "prometheus", params)
+        return run([script("run_supervised_smoke.sh"), supervisor(cfg), controller(cfg)], env=env)
+    finally:
+        cleanup_temp(tmp_path)
+
+
+def check_local_tool(name: str) -> bool:
+    return shutil.which(name) is not None
+
+
+def check_path(path: Path) -> bool:
+    return path.exists()
+
+
+def print_check(ok: bool, label: str, detail: str = "") -> bool:
+    status = "OK" if ok else "FAIL"
+    suffix = f" - {detail}" if detail else ""
+    print(f"[{status}] {label}{suffix}")
+    return ok
+
+
+def ssh_check(host: str, command: str, timeout: int = 10) -> tuple[bool, str]:
+    code, out = capture(["ssh", host, command], timeout=timeout)
+    return code == 0, out
+
+
+def ssh_jump_check(jump: str, host: str, command: str, timeout: int = 10) -> tuple[bool, str]:
+    code, out = capture(["ssh", jump, "ssh", host, command], timeout=timeout)
+    return code == 0, out
+
+
+def http_check(url: str, timeout: int = 3) -> bool:
+    try:
+        urllib.request.urlopen(url, timeout=timeout).read(1)
+    except Exception:
+        return False
+    return True
+
+
+def cmd_doctor(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
+    failures = 0
+
+    rt_tester_dir = Path(get(cfg, "pc", "rt_tester_dir"))
+    params = Path(get(cfg, "measurement", "params"))
+    arduino_port = Path(get(cfg, "pc", "arduino_port"))
+
+    print("== Local ==")
+    checks = [
+        print_check(check_local_tool("python3"), "python3 in PATH"),
+        print_check(check_local_tool("ssh"), "ssh in PATH"),
+        print_check(check_local_tool("scp"), "scp in PATH"),
+        print_check(check_path(rt_tester_dir), f"rt-tester dir: {rt_tester_dir}"),
+        print_check(check_path(params), f"measurement params: {params}"),
+        print_check(check_path(arduino_port), f"Arduino port: {arduino_port}"),
+    ]
+    if not check_local_tool("prometheus") and not check_local_tool("/bin/prometheus"):
+        checks.append(print_check(False, "prometheus in PATH or /bin/prometheus"))
+    else:
+        checks.append(print_check(True, "prometheus available"))
+    if not check_local_tool("grafana-server") and not check_path(Path("/bin/grafana-server")):
+        checks.append(print_check(False, "grafana-server in PATH or /bin/grafana-server"))
+    else:
+        checks.append(print_check(True, "grafana-server available"))
+
+    print("\n== Profile ==")
+    supervisor_board = get(cfg, "supervisor", "board")
+    controller_board = get(cfg, "controller", "board")
+    checks.extend(
+        [
+            print_check(supervisor_board in VALID_BOARDS, f"supervisor board: {supervisor_board}"),
+            print_check(controller_board in VALID_BOARDS, f"controller board: {controller_board}"),
+            print_check("/" in get(cfg, "supervisor", "supervisor_bin"), "supervisor binary path set"),
+            print_check("/" in get(cfg, "controller", "controller_bin"), "controller binary path set"),
+        ]
+    )
+
+    print("\n== Supervisor ==")
+    sup = supervisor(cfg)
+    ok, out = ssh_check(sup, "true")
+    checks.append(print_check(ok, f"ssh {sup}", out))
+    if ok:
+        for label, path in (
+            ("rt-supervisor dir", get(cfg, "supervisor", "rt_supervisor_dir")),
+            ("alt-rt-supervisor", get(cfg, "supervisor", "supervisor_bin")),
+            ("runtime wrapper", get(cfg, "supervisor", "runtime_wrapper")),
+        ):
+            path_ok, path_out = ssh_check(sup, f"test -e {path}")
+            checks.append(print_check(path_ok, f"{label}: {path}", path_out))
+
+    print("\n== Controller ==")
+    ctrl = controller(cfg)
+    jump = get(cfg, "controller", "ssh_jump")
+    ok, out = ssh_jump_check(jump, ctrl, "true")
+    checks.append(print_check(ok, f"ssh {ctrl} via {jump}", out))
+    if ok:
+        for label, path in (
+            ("rt-supervisor dir", get(cfg, "controller", "rt_supervisor_dir")),
+            ("controller-emu", get(cfg, "controller", "controller_bin")),
+        ):
+            path_ok, path_out = ssh_jump_check(jump, ctrl, f"test -e {path}")
+            checks.append(print_check(path_ok, f"{label}: {path}", path_out))
+
+    print("\n== Optional Running Services ==")
+    prom_url = get(cfg, "pc", "trace_prometheus_url")
+    print_check(http_check(prom_url + "/-/ready"), f"trace Prometheus ready: {prom_url}")
+    grafana_addr = get(cfg, "pc", "trace_grafana_addr")
+    print_check(http_check(f"http://{grafana_addr}/api/health"), f"trace Grafana ready: http://{grafana_addr}")
+
+    failures = sum(1 for ok in checks if not ok)
+    if failures:
+        print(f"\nDoctor found {failures} problem(s)")
+        return 1
+    print("\nDoctor passed")
+    return 0
+
+
+def add_measurement_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--groups", type=int, help="override measurement group count")
+    parser.add_argument("--interval-us", type=int, help="override Arduino pulse interval")
+    parser.add_argument(
+        "--measurements-per-group",
+        type=int,
+        help="override measurements per group",
+    )
+    parser.add_argument("--arduino-port", help="override Arduino serial port")
+    parser.add_argument("--receiver-timeout-sec", type=int, help="override receiver timeout")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="RT supervised stand convenience CLI")
+    parser.add_argument(
+        "--profile",
+        default=str(DEFAULT_PROFILE),
+        help=f"stand profile path (default: {DEFAULT_PROFILE})",
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    commands = {
+        "doctor": cmd_doctor,
+        "start": cmd_start,
+        "stop": cmd_stop,
+        "check": cmd_check,
+        "trace-start": cmd_trace_start,
+        "trace-stop": cmd_trace_stop,
+        "grafana-start": cmd_grafana_start,
+        "grafana-stop": cmd_grafana_stop,
+    }
+    for name, func in commands.items():
+        cmd = sub.add_parser(name)
+        cmd.set_defaults(func=func)
+
+    smoke = sub.add_parser("test-smoke", help="run non-trace smoke measurement")
+    add_measurement_options(smoke)
+    smoke.set_defaults(func=cmd_test_smoke)
+
+    trace = sub.add_parser("test-trace", help="run trace smoke measurement")
+    add_measurement_options(trace)
+    trace.add_argument(
+        "--no-trace-start",
+        action="store_true",
+        help="do not start local trace Prometheus before running smoke",
+    )
+    trace.set_defaults(func=cmd_test_trace)
+
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
+    args = parser.parse_args()
+    try:
+        cfg = load_profile(Path(args.profile))
+        return int(args.func(cfg, args) or 0)
+    except StandError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
