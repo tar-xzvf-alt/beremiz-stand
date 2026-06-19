@@ -307,6 +307,13 @@ VisionFive trace exporter: 10.43.0.1:9201
 TRACE_PROMETHEUS_URL=http://localhost:9090 scripts/run_supervised_smoke.sh
 ```
 
+Если ПК не имеет маршрута в сеть `10.43.0.0/24`, используйте SSH tunnels из
+`rt-tester/prometheus/trace-prometheus-local-tunnel.yml` и запускайте smoke с:
+
+```bash
+TRACE_PROMETHEUS_URL=http://127.0.0.1:9091 scripts/run_supervised_smoke.sh
+```
+
 Импорт сохраняет агрегаты по `(session_id, group_index, host, stage)` в таблицу
 `trace_group_metrics`. Между RockPI и VisionFive timestamps напрямую не
 вычитаются; сохраняются только durations внутри одного host.
