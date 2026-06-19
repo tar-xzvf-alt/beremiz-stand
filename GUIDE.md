@@ -288,6 +288,29 @@ SKIP_START=1 scripts/run_supervised_smoke.sh
 SMOKE_GROUPS=10 scripts/run_supervised_smoke.sh
 ```
 
+Trace-разбивка по стадиям включается тем же smoke script. Он передаёт один
+`SESSION_ID` в receiver, supervisor и controller, а controller добавляет в BETH
+payload `session_id`, `group_index` и `measurements-per-group`. На платах
+пишутся JSONL summaries и запускаются `trace_exporter.py` на порту `9201`.
+
+Prometheus должен scrape-ить:
+
+```text
+RockPI trace exporter:     10.43.0.2:9201
+VisionFive trace exporter: 10.43.0.1:9201
+```
+
+Если Prometheus доступен с ПК, trace metrics можно импортировать в SQLite сразу
+после smoke:
+
+```bash
+TRACE_PROMETHEUS_URL=http://localhost:9090 scripts/run_supervised_smoke.sh
+```
+
+Импорт сохраняет агрегаты по `(session_id, group_index, host, stage)` в таблицу
+`trace_group_metrics`. Между RockPI и VisionFive timestamps напрямую не
+вычитаются; сохраняются только durations внутри одного host.
+
 Для ручного режима можно запустить без `--start --exit-on-stop` и вводить
 `start`, `status`, `events`, `stop`, `exit` в интерактивной консоли.
 
