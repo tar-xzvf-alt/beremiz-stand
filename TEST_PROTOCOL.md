@@ -111,6 +111,47 @@ trace=visionfive/runtime_wait: groups=2 ...
 scripts/stop_trace_prometheus_local.sh
 ```
 
+## Trace В Grafana
+
+Для локального просмотра trace и Arduino latency через Grafana используйте
+provisioned dashboard из `rt-tester/grafana`:
+
+```bash
+scripts/start_trace_prometheus_local.sh
+scripts/start_trace_grafana_local.sh
+```
+
+Затем запустите trace smoke:
+
+```bash
+TRACE_MODE=prometheus \
+TRACE_PROMETHEUS_URL=http://127.0.0.1:9091 \
+SMOKE_GROUPS=2 \
+  scripts/run_supervised_smoke.sh
+```
+
+Откройте:
+
+```text
+http://127.0.0.1:3001/d/rt-trace-stages
+```
+
+Dashboard `RT Trace Stage Breakdown` содержит четыре панели:
+
+- `Average Latency`
+- `Maximum Latency`
+- `Average Trace Stage Duration`
+- `Maximum Trace Stage Duration`
+
+Выберите `session_id`, напечатанный smoke script. Для `SMOKE_GROUPS=2` после
+добавления `shmem_output` ожидается `Imported trace metrics: 18`.
+
+Остановить Grafana:
+
+```bash
+scripts/stop_trace_grafana_local.sh
+```
+
 ## A/B Overhead-Серия
 
 Перед серией включите локальный trace Prometheus:
