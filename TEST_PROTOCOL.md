@@ -19,6 +19,7 @@ Trace-метрики опциональны и разбивают путь на 
 | VisionFive | `ethernet_recv` |
 | VisionFive | `shmem_input` |
 | VisionFive | `runtime_wait` |
+| VisionFive | `shmem_output` |
 | VisionFive | `ethernet_send` |
 
 Не вычитайте timestamps между RockPI и VisionFive: clocks разные. Сравнивайте
@@ -96,12 +97,13 @@ SMOKE_GROUPS=2 \
 
 ```text
 trace_mode=prometheus
-Imported trace metrics: 16
+Imported trace metrics: 18
 trace=rockpi/gpio_to_send: groups=2 ...
 trace=visionfive/runtime_wait: groups=2 ...
 ```
 
-Для 2 групп ожидается 16 imported trace records: 2 groups * 2 hosts * 4 stages.
+Для 2 групп ожидается 18 imported trace records: 2 groups * (4 RockPI stages +
+5 VisionFive stages).
 
 Остановить локальный Prometheus и tunnels:
 
