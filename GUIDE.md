@@ -311,7 +311,9 @@ TRACE_PROMETHEUS_URL=http://localhost:9090 scripts/run_supervised_smoke.sh
 `rt-tester/prometheus/trace-prometheus-local-tunnel.yml` и запускайте smoke с:
 
 ```bash
+scripts/start_trace_prometheus_local.sh
 TRACE_PROMETHEUS_URL=http://127.0.0.1:9091 scripts/run_supervised_smoke.sh
+scripts/stop_trace_prometheus_local.sh
 ```
 
 Импорт сохраняет агрегаты по `(session_id, group_index, host, stage)` в таблицу
