@@ -61,6 +61,7 @@ scripts/stand.py build-rt-supervisor --clean-first --dry-run
 scripts/stand.py sync-stand
 scripts/stand.py build-plc
 scripts/stand.py install-runtime-wrapper
+scripts/stand.py start-runtime
 scripts/stand.py deploy-plc
 ```
 
@@ -124,6 +125,7 @@ scripts/stand.py build-rt-supervisor --clean-first
 scripts/stand.py sync-stand
 scripts/stand.py build-plc
 scripts/stand.py install-runtime-wrapper
+scripts/stand.py start-runtime
 scripts/stand.py deploy-plc
 scripts/stand.py check
 scripts/stand.py stop

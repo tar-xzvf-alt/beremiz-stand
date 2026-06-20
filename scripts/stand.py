@@ -331,6 +331,31 @@ def cmd_install_runtime_wrapper(cfg: configparser.ConfigParser, args: argparse.N
     )
 
 
+def cmd_start_runtime(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
+    return run_or_dry(
+        [
+            script("start_runtime_on_visionfive.sh"),
+            supervisor(cfg),
+            runtime_dir(cfg),
+            runtime_bind_ip(cfg),
+            runtime_port(cfg),
+            beremiz_stand_dir(cfg),
+        ],
+        args.dry_run,
+    )
+
+
+def cmd_stop_runtime(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
+    return run_or_dry(
+        [
+            script("stop_runtime_on_visionfive.sh"),
+            supervisor(cfg),
+            runtime_dir(cfg),
+        ],
+        args.dry_run,
+    )
+
+
 def cmd_deploy_plc(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
     return run_or_dry(
         [
@@ -898,6 +923,8 @@ def build_parser() -> argparse.ArgumentParser:
             cmd_install_runtime_wrapper,
             "install Beremiz runtime wrapper on VisionFive",
         ),
+        ("start-runtime", cmd_start_runtime, "start Beremiz runtime on VisionFive"),
+        ("stop-runtime", cmd_stop_runtime, "stop Beremiz runtime on VisionFive"),
         ("deploy-plc", cmd_deploy_plc, "transfer and run PLC project on runtime"),
         (
             "sync-plc-debug-build",
