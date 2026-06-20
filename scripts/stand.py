@@ -73,6 +73,13 @@ def run(cmd: list[str], env: dict[str, str] | None = None, check: bool = True) -
     return completed.returncode
 
 
+def run_or_dry(cmd: list[str], dry_run: bool) -> int:
+    if dry_run:
+        print("+ " + " ".join(cmd))
+        return 0
+    return run(cmd)
+
+
 def capture(cmd: list[str], timeout: int = 10) -> tuple[int, str]:
     try:
         completed = subprocess.run(
@@ -103,6 +110,31 @@ def supervisor(cfg: configparser.ConfigParser) -> str:
 
 def controller(cfg: configparser.ConfigParser) -> str:
     return get(cfg, "controller", "ssh")
+
+
+def beremiz_stand_dir(cfg: configparser.ConfigParser) -> str:
+    return get(cfg, "supervisor", "beremiz_stand_dir")
+
+
+def plc_project(cfg: configparser.ConfigParser) -> str:
+    return get(cfg, "supervisor", "plc_project")
+
+
+def runtime_dir(cfg: configparser.ConfigParser) -> str:
+    return get(cfg, "supervisor", "runtime_dir")
+
+
+def runtime_bind_ip(cfg: configparser.ConfigParser) -> str:
+    return opt(
+        cfg,
+        "supervisor",
+        "runtime_bind_ip",
+        addr_host(get(cfg, "supervisor", "pc_addr")),
+    )
+
+
+def runtime_port(cfg: configparser.ConfigParser) -> str:
+    return opt(cfg, "supervisor", "runtime_port", "3000")
 
 
 def smoke_env(
@@ -264,6 +296,63 @@ def cmd_test_trace(cfg: configparser.ConfigParser, args: argparse.Namespace) -> 
         return run([script("run_supervised_smoke.sh"), supervisor(cfg), controller(cfg)], env=env)
     finally:
         cleanup_temp(tmp_path)
+
+
+def cmd_sync_stand(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
+    return run_or_dry(
+        [script("sync_to_visionfive.sh"), supervisor(cfg), beremiz_stand_dir(cfg)],
+        args.dry_run,
+    )
+
+
+def cmd_build_plc(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
+    return run_or_dry(
+        [
+            script("build_supervised_raw_on_visionfive.sh"),
+            supervisor(cfg),
+            beremiz_stand_dir(cfg),
+            plc_project(cfg),
+        ],
+        args.dry_run,
+    )
+
+
+def cmd_install_runtime_wrapper(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
+    return run_or_dry(
+        [
+            script("install_supervised_runtime_wrapper_on_visionfive.sh"),
+            supervisor(cfg),
+            runtime_dir(cfg),
+            runtime_bind_ip(cfg),
+            runtime_port(cfg),
+            beremiz_stand_dir(cfg),
+        ],
+        args.dry_run,
+    )
+
+
+def cmd_deploy_plc(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
+    return run_or_dry(
+        [
+            script("deploy_run_supervised_raw_on_visionfive_runtime.sh"),
+            supervisor(cfg),
+            beremiz_stand_dir(cfg),
+            get(cfg, "supervisor", "erpc_url"),
+            plc_project(cfg),
+        ],
+        args.dry_run,
+    )
+
+
+def cmd_sync_plc_debug_build(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
+    return run_or_dry(
+        [
+            script("sync_supervised_debug_build_from_visionfive.sh"),
+            supervisor(cfg),
+            beremiz_stand_dir(cfg),
+        ],
+        args.dry_run,
+    )
 
 
 def selected_boards(args: argparse.Namespace) -> tuple[bool, bool]:
@@ -722,6 +811,7 @@ def cmd_doctor(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int
     if ok:
         for label, path in (
             ("rt-supervisor dir", get(cfg, "supervisor", "rt_supervisor_dir")),
+            ("beremiz-stand dir", beremiz_stand_dir(cfg)),
             ("alt-rt-supervisor", get(cfg, "supervisor", "supervisor_bin")),
             ("runtime wrapper", get(cfg, "supervisor", "runtime_wrapper")),
         ):
@@ -767,6 +857,14 @@ def add_measurement_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--receiver-timeout-sec", type=int, help="override receiver timeout")
 
 
+def add_dry_run(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print command without running it",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="RT supervised stand convenience CLI")
     parser.add_argument(
@@ -790,6 +888,25 @@ def build_parser() -> argparse.ArgumentParser:
     }
     for name, func in commands.items():
         cmd = sub.add_parser(name)
+        cmd.set_defaults(func=func)
+
+    for name, func, help_text in (
+        ("sync-stand", cmd_sync_stand, "sync beremiz-stand workspace to VisionFive"),
+        ("build-plc", cmd_build_plc, "build supervised PLC project on VisionFive"),
+        (
+            "install-runtime-wrapper",
+            cmd_install_runtime_wrapper,
+            "install Beremiz runtime wrapper on VisionFive",
+        ),
+        ("deploy-plc", cmd_deploy_plc, "transfer and run PLC project on runtime"),
+        (
+            "sync-plc-debug-build",
+            cmd_sync_plc_debug_build,
+            "copy PLC debug build artifacts back from VisionFive",
+        ),
+    ):
+        cmd = sub.add_parser(name, help=help_text)
+        add_dry_run(cmd)
         cmd.set_defaults(func=func)
 
     smoke = sub.add_parser("test-smoke", help="run non-trace smoke measurement")

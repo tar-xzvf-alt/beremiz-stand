@@ -53,7 +53,20 @@ scripts/stand.py deploy-rt-supervisor --dry-run
 scripts/stand.py build-rt-supervisor --clean-first --dry-run
 ```
 
-## 3. Запустить Обычный Smoke Без Trace
+## 3. Обновить PLC На VisionFive
+
+Если менялся Beremiz project/runtime wrapper, обновите PLC на VisionFive:
+
+```bash
+scripts/stand.py sync-stand
+scripts/stand.py build-plc
+scripts/stand.py install-runtime-wrapper
+scripts/stand.py deploy-plc
+```
+
+Для проверки без выполнения используйте `--dry-run` у каждой команды.
+
+## 4. Запустить Обычный Smoke Без Trace
 
 ```bash
 scripts/stand.py test-smoke
@@ -71,7 +84,7 @@ scripts/stand.py test-smoke --groups 2
 scripts/stand.py test-smoke --groups 2 --interval-us 1000
 ```
 
-## 4. Запустить Trace Smoke
+## 5. Запустить Trace Smoke
 
 ```bash
 scripts/stand.py test-trace --groups 2
@@ -86,7 +99,7 @@ smoke с `TRACE_MODE=prometheus` и импортирует trace metrics в SQLi
 Imported trace metrics: 18
 ```
 
-## 5. Открыть Grafana
+## 6. Открыть Grafana
 
 ```bash
 scripts/stand.py grafana-start
@@ -100,7 +113,7 @@ http://127.0.0.1:3001/d/rt-trace-stages
 
 В dashboard выберите `session_id`, напечатанный `test-trace`.
 
-## 6. Частые Команды
+## 7. Частые Команды
 
 ```bash
 scripts/stand.py start
@@ -108,6 +121,10 @@ scripts/stand.py network-check
 scripts/stand.py network-restore
 scripts/stand.py deploy-rt-supervisor
 scripts/stand.py build-rt-supervisor --clean-first
+scripts/stand.py sync-stand
+scripts/stand.py build-plc
+scripts/stand.py install-runtime-wrapper
+scripts/stand.py deploy-plc
 scripts/stand.py check
 scripts/stand.py stop
 scripts/stand.py trace-start
@@ -116,7 +133,7 @@ scripts/stand.py grafana-start
 scripts/stand.py grafana-stop
 ```
 
-## 7. Другой Profile
+## 8. Другой Profile
 
 Скопируйте текущий profile и поменяйте IP/пути/board names:
 
@@ -125,7 +142,7 @@ cp profiles/visionfive-rockpi.conf profiles/my-stand.conf
 scripts/stand.py --profile profiles/my-stand.conf doctor
 ```
 
-## 8. Остановить Все После Тестов
+## 9. Остановить Все После Тестов
 
 ```bash
 scripts/stand.py stop
