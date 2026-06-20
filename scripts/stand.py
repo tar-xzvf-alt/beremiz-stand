@@ -93,6 +93,10 @@ def script(name: str) -> str:
     return str(ROOT / "scripts" / name)
 
 
+def local_rt_supervisor(cfg: configparser.ConfigParser) -> Path:
+    return Path(get(cfg, "pc", "rt_supervisor_dir"))
+
+
 def supervisor(cfg: configparser.ConfigParser) -> str:
     return get(cfg, "supervisor", "ssh")
 
@@ -260,6 +264,180 @@ def cmd_test_trace(cfg: configparser.ConfigParser, args: argparse.Namespace) -> 
         return run([script("run_supervised_smoke.sh"), supervisor(cfg), controller(cfg)], env=env)
     finally:
         cleanup_temp(tmp_path)
+
+
+def selected_boards(args: argparse.Namespace) -> tuple[bool, bool]:
+    if args.supervisor_only and args.controller_only:
+        raise StandError("choose only one of --supervisor-only or --controller-only")
+    return not args.controller_only, not args.supervisor_only
+
+
+def create_rt_supervisor_archive(source: Path) -> Path:
+    if not source.is_dir():
+        raise StandError(f"local rt-supervisor dir not found: {source}")
+
+    archive = tempfile.NamedTemporaryFile(
+        prefix="rt-supervisor-transfer-",
+        suffix=".tgz",
+        delete=False,
+    )
+    archive.close()
+    run(
+        [
+            "tar",
+            "--exclude=./.git",
+            "--exclude=./Build",
+            "--exclude=__pycache__",
+            "-czf",
+            archive.name,
+            "-C",
+            str(source),
+            ".",
+        ]
+    )
+    return Path(archive.name)
+
+
+def assert_safe_remote_dir(path: str) -> None:
+    unsafe = {"", "/", "/root", "/home", "/tmp"}
+    if path in unsafe or not path.startswith("/"):
+        raise StandError(f"refusing unsafe remote directory: {path}")
+
+
+def scp_to(host: str, local: Path, remote: str) -> int:
+    cmd = ["scp", *SSH_AUTO_OPTS]
+    cmd.extend([str(local), f"{host}:{remote}"])
+    return run(cmd)
+
+
+def scp_to_via_jump(jump: str, host: str, local: Path, remote: str) -> int:
+    jump_archive = f"/tmp/{Path(remote).name}"
+    scp_to(jump, local, jump_archive)
+    inner_opts = " ".join(shlex.quote(part) for part in SSH_AUTO_OPTS)
+    remote_target = shlex.quote(f"{host}:{remote}")
+    return ssh_run(
+        jump,
+        "set -eu; "
+        f"scp {inner_opts} {shlex.quote(jump_archive)} {remote_target}; "
+        f"rm -f {shlex.quote(jump_archive)}",
+    )
+
+
+def ssh_run(host: str, command: str) -> int:
+    return run(["ssh", *SSH_AUTO_OPTS, host, command])
+
+
+def ssh_jump_run(jump: str, host: str, command: str) -> int:
+    inner_opts = " ".join(shlex.quote(part) for part in SSH_AUTO_OPTS)
+    remote_cmd = f"ssh {inner_opts} {shlex.quote(host)} {shlex.quote(command)}"
+    return run(["ssh", *SSH_AUTO_OPTS, jump, remote_cmd])
+
+
+def deploy_archive(host: str, remote_dir: str, archive: Path, jump: str | None = None) -> None:
+    assert_safe_remote_dir(remote_dir)
+    remote_archive = "/tmp/rt-supervisor-transfer.tgz"
+    if jump:
+        scp_to_via_jump(jump, host, archive, remote_archive)
+    else:
+        scp_to(host, archive, remote_archive)
+    remote_command = (
+        "set -eu; "
+        f"rm -rf {shlex.quote(remote_dir)}; "
+        f"mkdir -p {shlex.quote(remote_dir)}; "
+        f"tar -xzf {remote_archive} -C {shlex.quote(remote_dir)}; "
+        f"rm -f {remote_archive}"
+    )
+    if jump:
+        ssh_jump_run(jump, host, remote_command)
+    else:
+        ssh_run(host, remote_command)
+
+
+def cmake_build_command(remote_dir: str, board: str, target: str, clean: bool) -> str:
+    assert_safe_remote_dir(remote_dir)
+    build = f"cmake --build Build --target {shlex.quote(target)}"
+    if clean:
+        build += " --clean-first"
+    return (
+        "set -eu; "
+        f"cd {shlex.quote(remote_dir)}; "
+        f"cmake -S . -B Build -DBOARD={shlex.quote(board)}; "
+        f"{build}"
+    )
+
+
+def cmd_deploy_rt_supervisor(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
+    deploy_supervisor, deploy_controller = selected_boards(args)
+    archive = create_rt_supervisor_archive(local_rt_supervisor(cfg))
+    try:
+        if args.dry_run:
+            print(f"Created archive: {archive}")
+            if deploy_supervisor:
+                print(
+                    "Would deploy to VisionFive: "
+                    f"{supervisor(cfg)}:{get(cfg, 'supervisor', 'rt_supervisor_dir')}"
+                )
+            if deploy_controller:
+                print(
+                    "Would deploy to RockPI via VisionFive: "
+                    f"{controller(cfg)}:{get(cfg, 'controller', 'rt_supervisor_dir')}"
+                )
+            return 0
+        if deploy_supervisor:
+            print("== Deploy rt-supervisor to VisionFive ==")
+            deploy_archive(
+                supervisor(cfg),
+                get(cfg, "supervisor", "rt_supervisor_dir"),
+                archive,
+            )
+        if deploy_controller:
+            print("== Deploy rt-supervisor to RockPI ==")
+            deploy_archive(
+                controller(cfg),
+                get(cfg, "controller", "rt_supervisor_dir"),
+                archive,
+                jump=get(cfg, "controller", "ssh_jump"),
+            )
+    finally:
+        archive.unlink(missing_ok=True)
+    return 0
+
+
+def cmd_build_rt_supervisor(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
+    build_supervisor, build_controller = selected_boards(args)
+    supervisor_command = cmake_build_command(
+        get(cfg, "supervisor", "rt_supervisor_dir"),
+        get(cfg, "supervisor", "board"),
+        "alt-rt-supervisor",
+        args.clean_first,
+    )
+    controller_command = cmake_build_command(
+        get(cfg, "controller", "rt_supervisor_dir"),
+        get(cfg, "controller", "board"),
+        "controller-emu",
+        args.clean_first,
+    )
+    if args.dry_run:
+        if build_supervisor:
+            print(f"Would run on VisionFive {supervisor(cfg)}: {supervisor_command}")
+        if build_controller:
+            print(
+                "Would run on RockPI "
+                f"{controller(cfg)} via {get(cfg, 'controller', 'ssh_jump')}: "
+                f"{controller_command}"
+            )
+        return 0
+    if build_supervisor:
+        print("== Build alt-rt-supervisor on VisionFive ==")
+        ssh_run(supervisor(cfg), supervisor_command)
+    if build_controller:
+        print("== Build controller-emu on RockPI ==")
+        ssh_jump_run(
+            get(cfg, "controller", "ssh_jump"),
+            controller(cfg),
+            controller_command,
+        )
+    return 0
 
 
 def check_local_tool(name: str) -> bool:
@@ -501,6 +679,7 @@ def cmd_doctor(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int
     failures = 0
 
     rt_tester_dir = Path(get(cfg, "pc", "rt_tester_dir"))
+    rt_supervisor_dir = local_rt_supervisor(cfg)
     params = Path(get(cfg, "measurement", "params"))
     arduino_port = Path(get(cfg, "pc", "arduino_port"))
 
@@ -509,7 +688,9 @@ def cmd_doctor(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int
         print_check(check_local_tool("python3"), "python3 in PATH"),
         print_check(check_local_tool("ssh"), "ssh in PATH"),
         print_check(check_local_tool("scp"), "scp in PATH"),
+        print_check(check_local_tool("tar"), "tar in PATH"),
         print_check(check_path(rt_tester_dir), f"rt-tester dir: {rt_tester_dir}"),
+        print_check(check_path(rt_supervisor_dir), f"rt-supervisor dir: {rt_supervisor_dir}"),
         print_check(check_path(params), f"measurement params: {params}"),
         print_check(check_path(arduino_port), f"Arduino port: {arduino_port}"),
     ]
@@ -623,6 +804,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="do not start local trace Prometheus before running smoke",
     )
     trace.set_defaults(func=cmd_test_trace)
+
+    deploy = sub.add_parser("deploy-rt-supervisor", help="sync rt-supervisor sources to boards")
+    deploy.add_argument("--supervisor-only", action="store_true", help="only sync VisionFive")
+    deploy.add_argument("--controller-only", action="store_true", help="only sync RockPI")
+    deploy.add_argument("--dry-run", action="store_true", help="create archive and print actions")
+    deploy.set_defaults(func=cmd_deploy_rt_supervisor)
+
+    build = sub.add_parser("build-rt-supervisor", help="build rt-supervisor on boards")
+    build.add_argument("--supervisor-only", action="store_true", help="only build VisionFive")
+    build.add_argument("--controller-only", action="store_true", help="only build RockPI")
+    build.add_argument("--clean-first", action="store_true", help="pass --clean-first to cmake build")
+    build.add_argument("--dry-run", action="store_true", help="print remote build commands")
+    build.set_defaults(func=cmd_build_rt_supervisor)
 
     return parser
 
