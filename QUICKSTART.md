@@ -67,7 +67,29 @@ scripts/stand.py deploy-plc
 
 Для проверки без выполнения используйте `--dry-run` у каждой команды.
 
-## 4. Запустить Обычный Smoke Без Trace
+## 4. Полный Deploy И Logs
+
+Полный deploy всего стенда одной командой:
+
+```bash
+scripts/stand.py deploy-all
+```
+
+Перед реальным deploy можно посмотреть последовательность:
+
+```bash
+scripts/stand.py deploy-all --dry-run
+```
+
+Сразу после проблемного запуска собрать логи:
+
+```bash
+scripts/stand.py collect-logs
+```
+
+По умолчанию logs попадут в `/tmp/rt-stand-logs-*`.
+
+## 5. Запустить Обычный Smoke Без Trace
 
 ```bash
 scripts/stand.py test-smoke
@@ -85,7 +107,7 @@ scripts/stand.py test-smoke --groups 2
 scripts/stand.py test-smoke --groups 2 --interval-us 1000
 ```
 
-## 5. Запустить Trace Smoke
+## 6. Запустить Trace Smoke
 
 ```bash
 scripts/stand.py test-trace --groups 2
@@ -100,7 +122,7 @@ smoke с `TRACE_MODE=prometheus` и импортирует trace metrics в SQLi
 Imported trace metrics: 18
 ```
 
-## 6. Открыть Grafana
+## 7. Открыть Grafana
 
 ```bash
 scripts/stand.py grafana-start
@@ -114,10 +136,12 @@ http://127.0.0.1:3001/d/rt-trace-stages
 
 В dashboard выберите `session_id`, напечатанный `test-trace`.
 
-## 7. Частые Команды
+## 8. Частые Команды
 
 ```bash
 scripts/stand.py start
+scripts/stand.py deploy-all --dry-run
+scripts/stand.py deploy-all
 scripts/stand.py network-check
 scripts/stand.py network-restore
 scripts/stand.py deploy-rt-supervisor
@@ -133,9 +157,10 @@ scripts/stand.py trace-start
 scripts/stand.py trace-stop
 scripts/stand.py grafana-start
 scripts/stand.py grafana-stop
+scripts/stand.py collect-logs
 ```
 
-## 8. Другой Profile
+## 9. Другой Profile
 
 Скопируйте текущий profile и поменяйте IP/пути/board names:
 
@@ -144,7 +169,7 @@ cp profiles/visionfive-rockpi.conf profiles/my-stand.conf
 scripts/stand.py --profile profiles/my-stand.conf doctor
 ```
 
-## 9. Остановить Все После Тестов
+## 10. Остановить Все После Тестов
 
 ```bash
 scripts/stand.py stop

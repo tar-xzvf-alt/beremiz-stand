@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 
@@ -80,11 +81,19 @@ def run_or_dry(cmd: list[str], dry_run: bool) -> int:
     return run(cmd)
 
 
-def capture(cmd: list[str], timeout: int = 10) -> tuple[int, str]:
+def capture(
+    cmd: list[str],
+    timeout: int = 10,
+    env: dict[str, str] | None = None,
+) -> tuple[int, str]:
+    merged_env = os.environ.copy()
+    if env:
+        merged_env.update(env)
     try:
         completed = subprocess.run(
             cmd,
             cwd=ROOT,
+            env=merged_env,
             check=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -378,6 +387,179 @@ def cmd_sync_plc_debug_build(cfg: configparser.ConfigParser, args: argparse.Name
         ],
         args.dry_run,
     )
+
+
+def deploy_all_dry_run(args: argparse.Namespace) -> int:
+    print("+ scripts/stand.py stop")
+    print("+ scripts/stand.py network-check")
+    if not args.skip_rt_supervisor:
+        print("+ scripts/stand.py deploy-rt-supervisor")
+        build_cmd = "scripts/stand.py build-rt-supervisor"
+        if args.clean_first:
+            build_cmd += " --clean-first"
+        print("+ " + build_cmd)
+    if not args.skip_plc:
+        print("+ scripts/stand.py sync-stand")
+        print("+ scripts/stand.py build-plc")
+        print("+ scripts/stand.py install-runtime-wrapper")
+        print("+ scripts/stand.py start-runtime")
+        print("+ scripts/stand.py deploy-plc")
+    if not args.skip_smoke:
+        smoke = "test-trace" if args.trace_smoke else "test-smoke"
+        print(f"+ scripts/stand.py {smoke} --groups {args.groups}")
+    return 0
+
+
+def cmd_deploy_all(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
+    if args.dry_run:
+        return deploy_all_dry_run(args)
+
+    cmd_stop(cfg, args)
+    if cmd_network_check(cfg, args) != 0:
+        return 1
+
+    if not args.skip_rt_supervisor:
+        cmd_deploy_rt_supervisor(
+            cfg,
+            argparse.Namespace(
+                supervisor_only=False,
+                controller_only=False,
+                dry_run=False,
+            ),
+        )
+        cmd_build_rt_supervisor(
+            cfg,
+            argparse.Namespace(
+                supervisor_only=False,
+                controller_only=False,
+                clean_first=args.clean_first,
+                dry_run=False,
+            ),
+        )
+
+    if not args.skip_plc:
+        plc_args = argparse.Namespace(dry_run=False)
+        cmd_sync_stand(cfg, plc_args)
+        cmd_build_plc(cfg, plc_args)
+        cmd_install_runtime_wrapper(cfg, plc_args)
+        cmd_start_runtime(cfg, plc_args)
+        cmd_deploy_plc(cfg, plc_args)
+
+    if args.skip_smoke:
+        return 0
+
+    smoke_args = argparse.Namespace(
+        groups=args.groups,
+        interval_us=None,
+        measurements_per_group=None,
+        arduino_port=None,
+        receiver_timeout_sec=None,
+        no_trace_start=False,
+    )
+    if args.trace_smoke:
+        return cmd_test_trace(cfg, smoke_args)
+    return cmd_test_smoke(cfg, smoke_args)
+
+
+def timestamp() -> str:
+    return datetime.now().strftime("%Y%m%d-%H%M%S")
+
+
+def write_command_output(path: Path, cmd: list[str], code: int, output: str) -> None:
+    path.write_text(
+        "+ " + " ".join(cmd) + "\n"
+        f"exit_code={code}\n\n"
+        + output
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def remote_log_command(paths: list[str], lines: int) -> str:
+    quoted_paths = " ".join(shlex.quote(path) for path in paths)
+    return (
+        "set +e; "
+        "echo '== host =='; hostname; "
+        "echo '== date =='; date; "
+        "echo '== uname =='; uname -a; "
+        "echo '== addresses =='; ip -br addr; "
+        "echo '== processes =='; ps -eo pid,tid,cls,rtprio,pri,psr,comm,args; "
+        f"for f in {quoted_paths}; do "
+        "echo; echo \"== $f ==\"; "
+        "if [ -e \"$f\" ]; then "
+        f"tail -n {lines} \"$f\"; "
+        "else echo 'missing'; fi; "
+        "done"
+    )
+
+
+def cmd_collect_logs(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
+    outdir = Path(args.output or f"/tmp/rt-stand-logs-{timestamp()}")
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    check_cmd = [script("check_supervised_stack.sh"), supervisor(cfg), controller(cfg)]
+    code, out = capture(
+        check_cmd,
+        timeout=60,
+        env={"ERPC_URL": get(cfg, "supervisor", "erpc_url")},
+    )
+    write_command_output(outdir / "check_supervised_stack.txt", check_cmd, code, out)
+
+    network_cmd = [
+        str(Path(__file__).resolve()),
+        "--profile",
+        args.profile,
+        "network-check",
+    ]
+    code, out = capture(network_cmd, timeout=60)
+    write_command_output(outdir / "network_check.txt", network_cmd, code, out)
+
+    visionfive_logs = [
+        "/root/alt-rt-supervisor.log",
+        f"{runtime_dir(cfg)}/beremiz_service.log",
+        "/root/rt-trace-exporter.log",
+        "/tmp/rt-supervisor-trace.jsonl",
+    ]
+    code, out = capture(
+        [
+            "ssh",
+            *SSH_AUTO_OPTS,
+            supervisor(cfg),
+            remote_log_command(visionfive_logs, args.lines),
+        ],
+        timeout=60,
+    )
+    write_command_output(
+        outdir / "visionfive.txt",
+        ["ssh", supervisor(cfg), "<snapshot>"],
+        code,
+        out,
+    )
+
+    rockpi_logs = [
+        "/root/controller-emu.log",
+        "/root/rt-trace-exporter.log",
+        "/tmp/controller-emu-trace.jsonl",
+    ]
+    inner_opts = " ".join(shlex.quote(part) for part in SSH_AUTO_OPTS)
+    rockpi_command = remote_log_command(rockpi_logs, args.lines)
+    remote_cmd = (
+        f"ssh {inner_opts} {shlex.quote(controller(cfg))} "
+        f"{shlex.quote(rockpi_command)}"
+    )
+    code, out = capture(
+        ["ssh", *SSH_AUTO_OPTS, get(cfg, "controller", "ssh_jump"), remote_cmd],
+        timeout=60,
+    )
+    write_command_output(
+        outdir / "rockpi.txt",
+        ["ssh", get(cfg, "controller", "ssh_jump"), "ssh", controller(cfg), "<snapshot>"],
+        code,
+        out,
+    )
+
+    print(f"Collected logs in {outdir}")
+    return 0
 
 
 def selected_boards(args: argparse.Namespace) -> tuple[bool, bool]:
@@ -948,6 +1130,31 @@ def build_parser() -> argparse.ArgumentParser:
         help="do not start local trace Prometheus before running smoke",
     )
     trace.set_defaults(func=cmd_test_trace)
+
+    logs = sub.add_parser("collect-logs", help="collect board logs into a local directory")
+    logs.add_argument("--output", help="output directory (default: /tmp/rt-stand-logs-*)")
+    logs.add_argument("--lines", type=int, default=400, help="tail lines per remote log")
+    logs.set_defaults(func=cmd_collect_logs)
+
+    deploy_all = sub.add_parser("deploy-all", help="run full board and PLC deploy sequence")
+    deploy_all.add_argument("--dry-run", action="store_true", help="print sequence only")
+    deploy_all.add_argument(
+        "--no-clean-first",
+        action="store_false",
+        dest="clean_first",
+        default=True,
+        help="do not pass --clean-first to rt-supervisor builds",
+    )
+    deploy_all.add_argument("--skip-rt-supervisor", action="store_true")
+    deploy_all.add_argument("--skip-plc", action="store_true")
+    deploy_all.add_argument("--skip-smoke", action="store_true")
+    deploy_all.add_argument(
+        "--trace-smoke",
+        action="store_true",
+        help="run trace smoke instead of plain smoke",
+    )
+    deploy_all.add_argument("--groups", type=int, default=1, help="post-deploy smoke groups")
+    deploy_all.set_defaults(func=cmd_deploy_all)
 
     deploy = sub.add_parser("deploy-rt-supervisor", help="sync rt-supervisor sources to boards")
     deploy.add_argument("--supervisor-only", action="store_true", help="only sync VisionFive")
