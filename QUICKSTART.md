@@ -25,6 +25,17 @@ scripts/stand.py doctor
 Prometheus/Grafana в этом выводе считаются optional: они могут быть не запущены
 до trace-теста.
 
+Если после сброса Ethernet-настроек ПК/VisionFive не видно, сначала выполните:
+
+```bash
+scripts/stand.py network-restore
+scripts/stand.py network-check
+```
+
+`network-restore` восстанавливает локальный Ethernet profile ПК и, если
+VisionFive уже доступен по SSH, закрепляет адреса VisionFive/RockPI через
+NetworkManager.
+
 ## 2. Запустить Обычный Smoke Без Trace
 
 ```bash
@@ -76,6 +87,8 @@ http://127.0.0.1:3001/d/rt-trace-stages
 
 ```bash
 scripts/stand.py start
+scripts/stand.py network-check
+scripts/stand.py network-restore
 scripts/stand.py check
 scripts/stand.py stop
 scripts/stand.py trace-start

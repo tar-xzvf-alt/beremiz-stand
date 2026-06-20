@@ -2,6 +2,7 @@
 import argparse
 import configparser
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -23,6 +24,16 @@ VALID_BOARDS = {
     "rockpi4",
     "repkapi4",
 }
+SSH_AUTO_OPTS = [
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "StrictHostKeyChecking=no",
+    "-o",
+    "UserKnownHostsFile=/dev/null",
+    "-o",
+    "LogLevel=ERROR",
+]
 
 
 class StandError(Exception):
@@ -267,12 +278,14 @@ def print_check(ok: bool, label: str, detail: str = "") -> bool:
 
 
 def ssh_check(host: str, command: str, timeout: int = 10) -> tuple[bool, str]:
-    code, out = capture(["ssh", host, command], timeout=timeout)
+    code, out = capture(["ssh", *SSH_AUTO_OPTS, host, command], timeout=timeout)
     return code == 0, out
 
 
 def ssh_jump_check(jump: str, host: str, command: str, timeout: int = 10) -> tuple[bool, str]:
-    code, out = capture(["ssh", jump, "ssh", host, command], timeout=timeout)
+    inner_opts = " ".join(shlex.quote(part) for part in SSH_AUTO_OPTS)
+    remote_cmd = f"ssh {inner_opts} {shlex.quote(host)} {shlex.quote(command)}"
+    code, out = capture(["ssh", *SSH_AUTO_OPTS, jump, remote_cmd], timeout=timeout)
     return code == 0, out
 
 
@@ -282,6 +295,206 @@ def http_check(url: str, timeout: int = 3) -> bool:
     except Exception:
         return False
     return True
+
+
+def addr_host(addr: str) -> str:
+    return addr.split("/", 1)[0]
+
+
+def contains_addr(output: str, addr: str) -> bool:
+    return addr in output or addr_host(addr) in output
+
+
+def nmcli_restore_connection(connection: str, iface: str, addr: str) -> int:
+    run(
+        [
+            "nmcli",
+            "connection",
+            "modify",
+            connection,
+            "connection.interface-name",
+            iface,
+            "connection.autoconnect",
+            "yes",
+            "ipv4.method",
+            "manual",
+            "ipv4.addresses",
+            addr,
+            "ipv4.never-default",
+            "yes",
+            "ipv6.method",
+            "link-local",
+        ]
+    )
+    return run(["nmcli", "connection", "up", connection, "ifname", iface])
+
+
+def remote_restore_network(
+    host: str,
+    connection: str,
+    iface: str,
+    addr: str,
+    timeout: int = 20,
+) -> tuple[bool, str]:
+    command = (
+        "set -eu; "
+        "if command -v nmcli >/dev/null 2>&1; then "
+        f"if ! nmcli -t -f NAME connection show | grep -Fx -- '{connection}' >/dev/null; then "
+        f"nmcli connection add type ethernet ifname '{iface}' con-name '{connection}'; "
+        "fi; "
+        f"nmcli connection modify '{connection}' "
+        f"connection.interface-name '{iface}' "
+        "connection.autoconnect yes "
+        "ipv4.method manual "
+        f"ipv4.addresses '{addr}' "
+        "ipv4.never-default yes "
+        "ipv6.method disabled; "
+        f"nmcli connection up '{connection}' ifname '{iface}' || "
+        f"{{ ip addr replace '{addr}' dev '{iface}'; ip link set '{iface}' up; }}; "
+        "else "
+        f"ip addr replace '{addr}' dev '{iface}'; ip link set '{iface}' up; "
+        "fi; "
+        f"ip -br addr show '{iface}'"
+    )
+    return ssh_check(host, command, timeout=timeout)
+
+
+def remote_restore_network_via_jump(
+    jump: str,
+    host: str,
+    connection: str,
+    iface: str,
+    addr: str,
+    timeout: int = 20,
+) -> tuple[bool, str]:
+    command = (
+        "set -eu; "
+        "if command -v nmcli >/dev/null 2>&1; then "
+        f"if ! nmcli -t -f NAME connection show | grep -Fx -- '{connection}' >/dev/null; then "
+        f"nmcli connection add type ethernet ifname '{iface}' con-name '{connection}'; "
+        "fi; "
+        f"nmcli connection modify '{connection}' "
+        f"connection.interface-name '{iface}' "
+        "connection.autoconnect yes "
+        "ipv4.method manual "
+        f"ipv4.addresses '{addr}' "
+        "ipv4.never-default yes "
+        "ipv6.method disabled; "
+        f"nmcli connection up '{connection}' ifname '{iface}' || "
+        f"{{ ip addr replace '{addr}' dev '{iface}'; ip link set '{iface}' up; }}; "
+        "else "
+        f"ip addr replace '{addr}' dev '{iface}'; ip link set '{iface}' up; "
+        "fi; "
+        f"ip -br addr show '{iface}'"
+    )
+    return ssh_jump_check(jump, host, command, timeout=timeout)
+
+
+def cmd_network_check(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
+    checks: list[bool] = []
+
+    pc_iface = get(cfg, "pc", "ethernet_iface")
+    pc_addr = get(cfg, "pc", "ethernet_addr")
+    sup = supervisor(cfg)
+    sup_pc_iface = get(cfg, "supervisor", "pc_iface")
+    sup_pc_addr = get(cfg, "supervisor", "pc_addr")
+    sup_ctrl_iface = get(cfg, "supervisor", "controller_iface")
+    sup_ctrl_addr = get(cfg, "supervisor", "controller_addr")
+    ctrl = controller(cfg)
+    ctrl_iface = get(cfg, "controller", "iface")
+    ctrl_addr = get(cfg, "controller", "addr")
+    jump = get(cfg, "controller", "ssh_jump")
+
+    print("== PC Ethernet ==")
+    code, out = capture(["ip", "-br", "addr", "show", pc_iface])
+    print(out)
+    checks.append(print_check(code == 0 and contains_addr(out, pc_addr), f"{pc_iface} has {pc_addr}"))
+
+    print("\n== PC -> VisionFive ==")
+    code, out = capture(["ping", "-c", "3", "-W", "2", addr_host(sup_pc_addr)], timeout=10)
+    checks.append(print_check(code == 0, f"ping {addr_host(sup_pc_addr)}", out.splitlines()[-1] if out else ""))
+    ok, out = ssh_check(sup, f"ip -br addr show {sup_pc_iface}; ip -br addr show {sup_ctrl_iface}")
+    print(out)
+    checks.append(print_check(ok and contains_addr(out, sup_pc_addr), f"VisionFive {sup_pc_iface} has {sup_pc_addr}"))
+    checks.append(print_check(ok and contains_addr(out, sup_ctrl_addr), f"VisionFive {sup_ctrl_iface} has {sup_ctrl_addr}"))
+
+    print("\n== VisionFive -> RockPI ==")
+    ok, out = ssh_jump_check(jump, ctrl, f"ip -br addr show {ctrl_iface}")
+    print(out)
+    checks.append(print_check(ok and contains_addr(out, ctrl_addr), f"RockPI {ctrl_iface} has {ctrl_addr}"))
+    ok, out = ssh_check(sup, f"ping -c 3 -W 2 {addr_host(ctrl_addr)}")
+    checks.append(print_check(ok, f"VisionFive ping RockPI {addr_host(ctrl_addr)}", out.splitlines()[-1] if out else ""))
+
+    failures = sum(1 for ok in checks if not ok)
+    if failures:
+        print(f"\nNetwork check found {failures} problem(s)")
+        return 1
+    print("\nNetwork check passed")
+    return 0
+
+
+def cmd_network_restore(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
+    print("== Restore PC Ethernet ==")
+    nmcli_restore_connection(
+        get(cfg, "pc", "ethernet_connection"),
+        get(cfg, "pc", "ethernet_iface"),
+        get(cfg, "pc", "ethernet_addr"),
+    )
+
+    sup = supervisor(cfg)
+    ok, out = ssh_check(sup, "true", timeout=5)
+    if not ok:
+        print("\nVisionFive is still unreachable over SSH after PC Ethernet restore.")
+        print("Use serial/UART or board console to restore its PC-facing address:")
+        print(
+            "  "
+            f"nmcli connection modify {get(cfg, 'supervisor', 'pc_connection')} "
+            f"ipv4.method manual ipv4.addresses {get(cfg, 'supervisor', 'pc_addr')} "
+            "ipv4.never-default yes ipv6.method disabled"
+        )
+        print(
+            "  "
+            f"nmcli connection up {get(cfg, 'supervisor', 'pc_connection')} "
+            f"ifname {get(cfg, 'supervisor', 'pc_iface')}"
+        )
+        return 1
+
+    print("\n== Restore VisionFive Interfaces ==")
+    for connection, iface, addr in (
+        (
+            get(cfg, "supervisor", "pc_connection"),
+            get(cfg, "supervisor", "pc_iface"),
+            get(cfg, "supervisor", "pc_addr"),
+        ),
+        (
+            get(cfg, "supervisor", "controller_connection"),
+            get(cfg, "supervisor", "controller_iface"),
+            get(cfg, "supervisor", "controller_addr"),
+        ),
+    ):
+        ok, out = remote_restore_network(sup, connection, iface, addr)
+        print(out)
+        if not ok:
+            raise StandError(f"failed to restore VisionFive {iface}")
+
+    print("\n== Restore RockPI Interface If Reachable ==")
+    ok, out = ssh_jump_check(get(cfg, "controller", "ssh_jump"), controller(cfg), "true", timeout=5)
+    if not ok:
+        print("RockPI is not reachable via VisionFive; skipping RockPI restore")
+        return cmd_network_check(cfg, _args)
+
+    ok, out = remote_restore_network_via_jump(
+        get(cfg, "controller", "ssh_jump"),
+        controller(cfg),
+        get(cfg, "controller", "connection"),
+        get(cfg, "controller", "iface"),
+        get(cfg, "controller", "addr"),
+    )
+    print(out)
+    if not ok:
+        raise StandError("failed to restore RockPI interface")
+
+    return cmd_network_check(cfg, _args)
 
 
 def cmd_doctor(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
@@ -384,6 +597,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     commands = {
         "doctor": cmd_doctor,
+        "network-check": cmd_network_check,
+        "network-restore": cmd_network_restore,
         "start": cmd_start,
         "stop": cmd_stop,
         "check": cmd_check,
