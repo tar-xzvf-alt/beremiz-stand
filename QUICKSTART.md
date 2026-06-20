@@ -36,6 +36,15 @@ scripts/stand.py network-check
 VisionFive уже доступен по SSH, закрепляет адреса VisionFive/RockPI через
 NetworkManager.
 
+Проверить рассинхрон часов ПК/VisionFive/RockPI:
+
+```bash
+scripts/stand.py time-check
+```
+
+Большой skew объясняет предупреждения `timestamp ... in future` при `tar` и
+`cmake --build`.
+
 ## 2. Обновить `rt-supervisor` На Платах
 
 Если нужно обновить `rt-supervisor` на платах из локального checkout:
@@ -144,6 +153,7 @@ scripts/stand.py deploy-all --dry-run
 scripts/stand.py deploy-all
 scripts/stand.py network-check
 scripts/stand.py network-restore
+scripts/stand.py time-check
 scripts/stand.py deploy-rt-supervisor
 scripts/stand.py build-rt-supervisor --clean-first
 scripts/stand.py sync-stand

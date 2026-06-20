@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -514,6 +515,15 @@ def cmd_collect_logs(cfg: configparser.ConfigParser, args: argparse.Namespace) -
     code, out = capture(network_cmd, timeout=60)
     write_command_output(outdir / "network_check.txt", network_cmd, code, out)
 
+    time_cmd = [
+        str(Path(__file__).resolve()),
+        "--profile",
+        args.profile,
+        "time-check",
+    ]
+    code, out = capture(time_cmd, timeout=60)
+    write_command_output(outdir / "time_check.txt", time_cmd, code, out)
+
     visionfive_logs = [
         "/root/alt-rt-supervisor.log",
         f"{runtime_dir(cfg)}/beremiz_service.log",
@@ -777,6 +787,69 @@ def addr_host(addr: str) -> str:
 
 def contains_addr(output: str, addr: str) -> bool:
     return addr in output or addr_host(addr) in output
+
+
+def parse_epoch(output: str) -> int:
+    for line in output.splitlines():
+        line = line.strip()
+        if line.isdigit():
+            return int(line)
+    raise StandError(f"could not parse epoch from output: {output}")
+
+
+def remote_time_skew(host: str) -> tuple[bool, int | None, str]:
+    start = time.time()
+    ok, out = ssh_check(host, "date -u +%s", timeout=10)
+    end = time.time()
+    if not ok:
+        return False, None, out
+    local_epoch = round((start + end) / 2)
+    return True, parse_epoch(out) - local_epoch, out
+
+
+def remote_time_skew_via_jump(jump: str, host: str) -> tuple[bool, int | None, str]:
+    start = time.time()
+    ok, out = ssh_jump_check(jump, host, "date -u +%s", timeout=10)
+    end = time.time()
+    if not ok:
+        return False, None, out
+    local_epoch = round((start + end) / 2)
+    return True, parse_epoch(out) - local_epoch, out
+
+
+def cmd_time_check(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
+    max_skew = args.max_skew_sec
+    checks: list[bool] = []
+
+    print("== Local ==")
+    print(datetime.now().astimezone().isoformat())
+
+    print("\n== VisionFive ==")
+    ok, skew, out = remote_time_skew(supervisor(cfg))
+    if ok and skew is not None:
+        checks.append(
+            print_check(abs(skew) <= max_skew, f"skew <= {max_skew}s", f"{skew:+d}s")
+        )
+    else:
+        print(out)
+        checks.append(print_check(False, "read VisionFive time"))
+
+    print("\n== RockPI ==")
+    ok, skew, out = remote_time_skew_via_jump(get(cfg, "controller", "ssh_jump"), controller(cfg))
+    if ok and skew is not None:
+        checks.append(
+            print_check(abs(skew) <= max_skew, f"skew <= {max_skew}s", f"{skew:+d}s")
+        )
+    else:
+        print(out)
+        checks.append(print_check(False, "read RockPI time"))
+
+    failures = sum(1 for ok in checks if not ok)
+    if failures:
+        print(f"\nTime check found {failures} problem(s)")
+        return 1
+    print("\nTime check passed")
+    return 0
 
 
 def nmcli_restore_connection(connection: str, iface: str, addr: str) -> int:
@@ -1083,6 +1156,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     commands = {
         "doctor": cmd_doctor,
+        "time-check": cmd_time_check,
         "network-check": cmd_network_check,
         "network-restore": cmd_network_restore,
         "start": cmd_start,
@@ -1095,6 +1169,13 @@ def build_parser() -> argparse.ArgumentParser:
     }
     for name, func in commands.items():
         cmd = sub.add_parser(name)
+        if name == "time-check":
+            cmd.add_argument(
+                "--max-skew-sec",
+                type=int,
+                default=5,
+                help="maximum allowed local-to-board clock skew",
+            )
         cmd.set_defaults(func=func)
 
     for name, func, help_text in (
