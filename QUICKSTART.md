@@ -48,6 +48,8 @@ curl http://10.43.0.2:9201/metrics
 питание/линк RockPI: direct route с ПК не заработает, пока сам RockPI не отвечает
 на `10.43.0.2` со стороны VisionFive.
 
+RockPI UART в текущем стенде работает на `1500000` baud.
+
 Проверить рассинхрон часов ПК/VisionFive/RockPI:
 
 ```bash
