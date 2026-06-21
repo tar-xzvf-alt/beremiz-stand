@@ -36,6 +36,18 @@ scripts/stand.py network-check
 VisionFive уже доступен по SSH, закрепляет адреса VisionFive/RockPI через
 NetworkManager.
 
+После успешного `network-restore` ПК должен ходить на RockPI напрямую через
+VisionFive как router:
+
+```bash
+ssh root@10.43.0.2
+curl http://10.43.0.2:9201/metrics
+```
+
+Если `network-check` пишет, что VisionFive не видит RockPI, сначала проверьте
+питание/линк RockPI: direct route с ПК не заработает, пока сам RockPI не отвечает
+на `10.43.0.2` со стороны VisionFive.
+
 Проверить рассинхрон часов ПК/VisionFive/RockPI:
 
 ```bash

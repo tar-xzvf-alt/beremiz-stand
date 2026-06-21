@@ -876,6 +876,12 @@ def nmcli_restore_connection(connection: str, iface: str, addr: str) -> int:
     return run(["nmcli", "connection", "up", connection, "ifname", iface])
 
 
+def nmcli_restore_route(connection: str, route: str, gateway: str) -> int:
+    route_value = f"{route} {gateway}"
+    run(["nmcli", "connection", "modify", connection, "ipv4.routes", route_value])
+    return run(["nmcli", "connection", "up", connection])
+
+
 def remote_restore_network(
     host: str,
     connection: str,
@@ -937,11 +943,67 @@ def remote_restore_network_via_jump(
     return ssh_jump_check(jump, host, command, timeout=timeout)
 
 
+def remote_enable_ip_forward(host: str, persist: bool, timeout: int = 10) -> tuple[bool, str]:
+    command = "set -eu; sysctl -w net.ipv4.ip_forward=1; "
+    if persist:
+        command += (
+            "printf '%s\\n' 'net.ipv4.ip_forward = 1' "
+            "> /etc/sysctl.d/99-rt-stand-forward.conf; "
+        )
+    command += "sysctl net.ipv4.ip_forward"
+    return ssh_check(host, command, timeout=timeout)
+
+
+def remote_restore_route_via_jump(
+    jump: str,
+    host: str,
+    connection: str,
+    route: str,
+    gateway: str,
+    timeout: int = 20,
+) -> tuple[bool, str]:
+    route_value = f"{route} {gateway}"
+    command = (
+        "set -eu; "
+        "if command -v nmcli >/dev/null 2>&1; then "
+        f"nmcli connection modify {shlex.quote(connection)} "
+        f"ipv4.routes {shlex.quote(route_value)}; "
+        "fi; "
+        f"ip route replace {shlex.quote(route)} via {shlex.quote(gateway)}; "
+        "ip route"
+    )
+    return ssh_jump_check(jump, host, command, timeout=timeout)
+
+
+def install_controller_ssh_key(cfg: configparser.ConfigParser) -> tuple[bool, str]:
+    key_path = Path(get(cfg, "pc", "ssh_public_key"))
+    if not key_path.is_file():
+        return False, f"SSH public key not found: {key_path}"
+    key = key_path.read_text(encoding="utf-8").strip()
+    if not key:
+        return False, f"SSH public key is empty: {key_path}"
+    command = (
+        "set -eu; "
+        "mkdir -p /root/.ssh; chmod 700 /root/.ssh; "
+        "touch /root/.ssh/authorized_keys; chmod 600 /root/.ssh/authorized_keys; "
+        f"grep -qxF {shlex.quote(key)} /root/.ssh/authorized_keys || "
+        f"printf '%s\\n' {shlex.quote(key)} >> /root/.ssh/authorized_keys"
+    )
+    return ssh_jump_check(
+        get(cfg, "controller", "ssh_jump"),
+        controller(cfg),
+        command,
+        timeout=20,
+    )
+
+
 def cmd_network_check(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
     checks: list[bool] = []
 
     pc_iface = get(cfg, "pc", "ethernet_iface")
     pc_addr = get(cfg, "pc", "ethernet_addr")
+    pc_controller_route = get(cfg, "pc", "controller_route")
+    pc_controller_gateway = get(cfg, "pc", "controller_gateway")
     sup = supervisor(cfg)
     sup_pc_iface = get(cfg, "supervisor", "pc_iface")
     sup_pc_addr = get(cfg, "supervisor", "pc_addr")
@@ -950,12 +1012,22 @@ def cmd_network_check(cfg: configparser.ConfigParser, _args: argparse.Namespace)
     ctrl = controller(cfg)
     ctrl_iface = get(cfg, "controller", "iface")
     ctrl_addr = get(cfg, "controller", "addr")
+    ctrl_pc_route = get(cfg, "controller", "pc_route")
+    ctrl_pc_gateway = get(cfg, "controller", "pc_gateway")
     jump = get(cfg, "controller", "ssh_jump")
 
     print("== PC Ethernet ==")
     code, out = capture(["ip", "-br", "addr", "show", pc_iface])
     print(out)
     checks.append(print_check(code == 0 and contains_addr(out, pc_addr), f"{pc_iface} has {pc_addr}"))
+    code, out = capture(["ip", "route", "get", addr_host(ctrl_addr)])
+    print(out)
+    checks.append(
+        print_check(
+            code == 0 and pc_controller_gateway in out and pc_iface in out,
+            f"PC route {pc_controller_route} via {pc_controller_gateway}",
+        )
+    )
 
     print("\n== PC -> VisionFive ==")
     code, out = capture(["ping", "-c", "3", "-W", "2", addr_host(sup_pc_addr)], timeout=10)
@@ -964,13 +1036,29 @@ def cmd_network_check(cfg: configparser.ConfigParser, _args: argparse.Namespace)
     print(out)
     checks.append(print_check(ok and contains_addr(out, sup_pc_addr), f"VisionFive {sup_pc_iface} has {sup_pc_addr}"))
     checks.append(print_check(ok and contains_addr(out, sup_ctrl_addr), f"VisionFive {sup_ctrl_iface} has {sup_ctrl_addr}"))
+    ok, out = ssh_check(sup, "sysctl -n net.ipv4.ip_forward")
+    checks.append(print_check(ok and out.strip() == "1", "VisionFive IPv4 forwarding enabled", out))
 
     print("\n== VisionFive -> RockPI ==")
     ok, out = ssh_jump_check(jump, ctrl, f"ip -br addr show {ctrl_iface}")
     print(out)
     checks.append(print_check(ok and contains_addr(out, ctrl_addr), f"RockPI {ctrl_iface} has {ctrl_addr}"))
+    ok_route, route_out = ssh_jump_check(jump, ctrl, f"ip route get {addr_host(pc_addr)}")
+    print(route_out)
+    checks.append(
+        print_check(
+            ok_route and ctrl_pc_gateway in route_out,
+            f"RockPI route {ctrl_pc_route} via {ctrl_pc_gateway}",
+        )
+    )
     ok, out = ssh_check(sup, f"ping -c 3 -W 2 {addr_host(ctrl_addr)}")
     checks.append(print_check(ok, f"VisionFive ping RockPI {addr_host(ctrl_addr)}", out.splitlines()[-1] if out else ""))
+
+    print("\n== PC -> RockPI Direct ==")
+    code, out = capture(["ping", "-c", "3", "-W", "2", addr_host(ctrl_addr)], timeout=10)
+    checks.append(print_check(code == 0, f"PC ping RockPI {addr_host(ctrl_addr)}", out.splitlines()[-1] if out else ""))
+    code, out = capture(["ssh", *SSH_AUTO_OPTS, controller(cfg), "true"], timeout=10)
+    checks.append(print_check(code == 0, f"PC ssh {controller(cfg)}", out))
 
     failures = sum(1 for ok in checks if not ok)
     if failures:
@@ -986,6 +1074,11 @@ def cmd_network_restore(cfg: configparser.ConfigParser, _args: argparse.Namespac
         get(cfg, "pc", "ethernet_connection"),
         get(cfg, "pc", "ethernet_iface"),
         get(cfg, "pc", "ethernet_addr"),
+    )
+    nmcli_restore_route(
+        get(cfg, "pc", "ethernet_connection"),
+        get(cfg, "pc", "controller_route"),
+        get(cfg, "pc", "controller_gateway"),
     )
 
     sup = supervisor(cfg)
@@ -1024,6 +1117,14 @@ def cmd_network_restore(cfg: configparser.ConfigParser, _args: argparse.Namespac
         if not ok:
             raise StandError(f"failed to restore VisionFive {iface}")
 
+    ok, out = remote_enable_ip_forward(
+        sup,
+        opt(cfg, "supervisor", "enable_ip_forward", "yes").lower() in {"1", "yes", "true", "on"},
+    )
+    print(out)
+    if not ok:
+        raise StandError("failed to enable VisionFive IPv4 forwarding")
+
     print("\n== Restore RockPI Interface If Reachable ==")
     ok, out = ssh_jump_check(get(cfg, "controller", "ssh_jump"), controller(cfg), "true", timeout=5)
     if not ok:
@@ -1040,6 +1141,23 @@ def cmd_network_restore(cfg: configparser.ConfigParser, _args: argparse.Namespac
     print(out)
     if not ok:
         raise StandError("failed to restore RockPI interface")
+
+    ok, out = remote_restore_route_via_jump(
+        get(cfg, "controller", "ssh_jump"),
+        controller(cfg),
+        get(cfg, "controller", "connection"),
+        get(cfg, "controller", "pc_route"),
+        get(cfg, "controller", "pc_gateway"),
+    )
+    print(out)
+    if not ok:
+        raise StandError("failed to restore RockPI reverse route")
+
+    ok, out = install_controller_ssh_key(cfg)
+    if ok:
+        print("Installed PC SSH public key on RockPI")
+    else:
+        print(f"RockPI SSH key install skipped/failed: {out}")
 
     return cmd_network_check(cfg, _args)
 
