@@ -817,6 +817,21 @@ def remote_time_skew_via_jump(jump: str, host: str) -> tuple[bool, int | None, s
     return True, parse_epoch(out) - local_epoch, out
 
 
+def set_remote_time(host: str, epoch: int, timeout: int = 20) -> tuple[bool, str]:
+    command = f"date -u -s @{epoch}; date -u +%s"
+    return ssh_check(host, command, timeout=timeout)
+
+
+def set_remote_time_via_jump(
+    jump: str,
+    host: str,
+    epoch: int,
+    timeout: int = 20,
+) -> tuple[bool, str]:
+    command = f"date -u -s @{epoch}; date -u +%s"
+    return ssh_jump_check(jump, host, command, timeout=timeout)
+
+
 def cmd_time_check(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
     max_skew = args.max_skew_sec
     checks: list[bool] = []
@@ -850,6 +865,29 @@ def cmd_time_check(cfg: configparser.ConfigParser, args: argparse.Namespace) -> 
         return 1
     print("\nTime check passed")
     return 0
+
+
+def cmd_time_restore(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
+    epoch = int(time.time())
+    checks: list[bool] = []
+
+    print(f"== Set board clocks to PC epoch {epoch} ==")
+
+    print("\n== VisionFive ==")
+    ok, out = set_remote_time(supervisor(cfg), epoch)
+    print(out)
+    checks.append(print_check(ok, "set VisionFive time"))
+
+    print("\n== RockPI ==")
+    ok, out = set_remote_time_via_jump(get(cfg, "controller", "ssh_jump"), controller(cfg), epoch)
+    print(out)
+    checks.append(print_check(ok, "set RockPI time"))
+
+    if not all(checks):
+        print("\nTime restore failed")
+        return 1
+
+    return cmd_time_check(cfg, argparse.Namespace(max_skew_sec=args.max_skew_sec))
 
 
 def nmcli_restore_connection(connection: str, iface: str, addr: str) -> int:
@@ -1275,6 +1313,7 @@ def build_parser() -> argparse.ArgumentParser:
     commands = {
         "doctor": cmd_doctor,
         "time-check": cmd_time_check,
+        "time-restore": cmd_time_restore,
         "network-check": cmd_network_check,
         "network-restore": cmd_network_restore,
         "start": cmd_start,
@@ -1287,7 +1326,7 @@ def build_parser() -> argparse.ArgumentParser:
     }
     for name, func in commands.items():
         cmd = sub.add_parser(name)
-        if name == "time-check":
+        if name in {"time-check", "time-restore"}:
             cmd.add_argument(
                 "--max-skew-sec",
                 type=int,

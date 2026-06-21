@@ -56,6 +56,12 @@ RockPI UART в текущем стенде работает на `1500000` baud.
 scripts/stand.py time-check
 ```
 
+Восстановить время плат по текущим часам ПК:
+
+```bash
+scripts/stand.py time-restore
+```
+
 Большой skew объясняет предупреждения `timestamp ... in future` при `tar` и
 `cmake --build`.
 
