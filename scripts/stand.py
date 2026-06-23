@@ -2,6 +2,7 @@
 import argparse
 import configparser
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -761,6 +762,34 @@ def print_check(ok: bool, label: str, detail: str = "") -> bool:
     return ok
 
 
+def print_status(ok: bool, label: str, detail: str = "", optional: bool = False) -> bool:
+    status = "OK" if ok else ("WARN" if optional else "FAIL")
+    suffix = f" - {detail}" if detail else ""
+    print(f"[{status}] {label}{suffix}")
+    return ok or optional
+
+
+def first_line(output: str) -> str:
+    for line in output.splitlines():
+        if line.strip():
+            return line.strip()
+    return ""
+
+
+def last_line(output: str) -> str:
+    for line in reversed(output.splitlines()):
+        if line.strip():
+            return line.strip()
+    return ""
+
+
+def pgrep_executable_pattern(path: str) -> str:
+    name = Path(path).name
+    if not name:
+        return path
+    return f"/{re.escape(name)}([[:space:]]|$)"
+
+
 def ssh_check(host: str, command: str, timeout: int = 10) -> tuple[bool, str]:
     code, out = capture(["ssh", *SSH_AUTO_OPTS, host, command], timeout=timeout)
     return code == 0, out
@@ -1200,6 +1229,106 @@ def cmd_network_restore(cfg: configparser.ConfigParser, _args: argparse.Namespac
     return cmd_network_check(cfg, _args)
 
 
+def cmd_status(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
+    checks: list[bool] = []
+    sup = supervisor(cfg)
+    ctrl = controller(cfg)
+    ctrl_addr = get(cfg, "controller", "addr")
+    pc_controller_gateway = get(cfg, "pc", "controller_gateway")
+    pc_iface = get(cfg, "pc", "ethernet_iface")
+
+    print("== Network ==")
+    code, out = capture(["ip", "route", "get", addr_host(ctrl_addr)], timeout=5)
+    checks.append(
+        print_status(
+            code == 0 and pc_controller_gateway in out and pc_iface in out,
+            "PC route to RockPI",
+            first_line(out),
+        )
+    )
+    code, out = capture(
+        ["ping", "-c", "1", "-W", "2", addr_host(get(cfg, "supervisor", "pc_addr"))],
+        timeout=5,
+    )
+    checks.append(print_status(code == 0, "PC -> VisionFive ping", first_line(out)))
+    code, out = capture(["ping", "-c", "1", "-W", "2", addr_host(ctrl_addr)], timeout=5)
+    checks.append(print_status(code == 0, "PC -> RockPI ping", first_line(out)))
+    code, out = capture(["ssh", *SSH_AUTO_OPTS, sup, "true"], timeout=5)
+    checks.append(print_status(code == 0, "PC -> VisionFive ssh", out))
+    code, out = capture(["ssh", *SSH_AUTO_OPTS, ctrl, "true"], timeout=5)
+    checks.append(print_status(code == 0, "PC -> RockPI ssh", out))
+    ok, out = ssh_check(sup, "sysctl -n net.ipv4.ip_forward", timeout=5)
+    checks.append(print_status(ok and out.strip() == "1", "VisionFive forwarding", out))
+
+    print("\n== Time ==")
+    ok, skew, out = remote_time_skew(sup)
+    checks.append(
+        print_status(
+            ok and skew is not None and abs(skew) <= 5,
+            "VisionFive clock",
+            f"{skew:+d}s" if skew is not None else out,
+        )
+    )
+    ok, skew, out = remote_time_skew(ctrl)
+    checks.append(
+        print_status(
+            ok and skew is not None and abs(skew) <= 5,
+            "RockPI clock",
+            f"{skew:+d}s" if skew is not None else out,
+        )
+    )
+
+    print("\n== Runtime ==")
+    erpc_cmd = (
+        f"python3 {shlex.quote(beremiz_stand_dir(cfg) + '/scripts/check_runtime_status.py')} "
+        f"{shlex.quote(get(cfg, 'supervisor', 'erpc_url'))}"
+    )
+    ok, out = ssh_check(sup, erpc_cmd, timeout=10)
+    plc_detail = first_line(out) if "PLC Status:" in out else last_line(out)
+    checks.append(
+        print_status(ok and "PLC Status: Started" in out, "PLC runtime", plc_detail)
+    )
+    ok, out = ssh_check(
+        sup,
+        "pgrep -a -f "
+        f"{shlex.quote(pgrep_executable_pattern(get(cfg, 'supervisor', 'supervisor_bin')))} "
+        "|| true",
+        timeout=5,
+    )
+    checks.append(print_status(ok and bool(out.strip()), "alt-rt-supervisor", first_line(out)))
+    ok, out = ssh_check(
+        ctrl,
+        "pgrep -a -f "
+        f"{shlex.quote(pgrep_executable_pattern(get(cfg, 'controller', 'controller_bin')))} "
+        "|| true",
+        timeout=5,
+    )
+    checks.append(print_status(ok and bool(out.strip()), "controller-emu", first_line(out)))
+
+    print("\n== Optional Services ==")
+    prom_url = get(cfg, "pc", "trace_prometheus_url")
+    print_status(http_check(prom_url + "/-/ready"), "trace Prometheus", prom_url, optional=True)
+    grafana_addr = get(cfg, "pc", "trace_grafana_addr")
+    print_status(http_check(f"http://{grafana_addr}/api/health"), "trace Grafana", f"http://{grafana_addr}", optional=True)
+    print_status(
+        http_check(f"http://{addr_host(get(cfg, 'supervisor', 'pc_addr'))}:9201/metrics"),
+        "VisionFive trace exporter",
+        optional=True,
+    )
+    print_status(
+        http_check(f"http://{addr_host(ctrl_addr)}:9201/metrics"),
+        "RockPI trace exporter",
+        optional=True,
+    )
+
+    failures = sum(1 for ok in checks if not ok)
+    if failures:
+        print(f"\nStatus found {failures} problem(s)")
+        return 1
+    print("\nStatus OK")
+    return 0
+
+
 def cmd_doctor(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
     failures = 0
 
@@ -1312,6 +1441,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     commands = {
         "doctor": cmd_doctor,
+        "status": cmd_status,
         "time-check": cmd_time_check,
         "time-restore": cmd_time_restore,
         "network-check": cmd_network_check,

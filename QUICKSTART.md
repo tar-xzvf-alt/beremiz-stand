@@ -18,12 +18,14 @@ profiles/visionfive-rockpi.conf
 ```bash
 cd /home/taranev/work_repos/beremiz-stand
 scripts/stand.py doctor
+scripts/stand.py status
 ```
 
 `doctor` проверяет локальные утилиты, SSH до VisionFive/RockPI, пути к
 `rt-supervisor`, binaries, runtime wrapper, Arduino port и валидность board names.
 Prometheus/Grafana в этом выводе считаются optional: они могут быть не запущены
 до trace-теста.
+`status` даёт короткий read-only summary текущего runtime/network состояния.
 
 Если после сброса Ethernet-настроек ПК/VisionFive не видно, сначала выполните:
 
@@ -169,6 +171,7 @@ http://127.0.0.1:3001/d/rt-trace-stages
 
 ```bash
 scripts/stand.py start
+scripts/stand.py status
 scripts/stand.py deploy-all --dry-run
 scripts/stand.py deploy-all
 scripts/stand.py network-check
