@@ -254,7 +254,21 @@ def cmd_start(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
 
 
 def cmd_stop(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
-    return run([script("stop_supervised_stack.sh"), supervisor(cfg), controller(cfg)])
+    sup = supervisor(cfg)
+    ctrl = controller(cfg)
+    jump = get(cfg, "controller", "ssh_jump")
+
+    remote_kill_via_jump(jump, ctrl, "controller-emu", "controller-emu")
+    remote_kill_pattern_via_jump(jump, ctrl, "trace_exporter.py", "/[t]race_exporter.py/ { print $1 }")
+
+    remote_kill(sup, "alt-rt-supervisor", "alt-rt-supervis")
+    remote_kill_pattern(sup, "Beremiz_service.py", "/[B]eremiz_service.py/ { print $1 }")
+    remote_kill_pattern(sup, "trace_exporter.py", "/[t]race_exporter.py/ { print $1 }")
+
+    _, out = ssh_check(sup, "rm -f /dev/shm/shmem_input /dev/shm/shmem_output", timeout=5)
+    if out:
+        print(out)
+    return 0
 
 
 def cmd_check(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
@@ -814,11 +828,134 @@ def ssh_check(host: str, command: str, timeout: int = 10) -> tuple[bool, str]:
     return code == 0, out
 
 
+def ssh_script(host: str, script: str, timeout: int = 30) -> tuple[bool, str]:
+    try:
+        completed = subprocess.run(
+            ["ssh", *SSH_AUTO_OPTS, host, "sh -s"],
+            input=script,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        return completed.returncode == 0, completed.stdout.strip()
+    except subprocess.TimeoutExpired as exc:
+        return False, (exc.stdout or "timeout").strip()
+
+
+def ssh_jump_script(
+    jump: str,
+    host: str,
+    script: str,
+    timeout: int = 30,
+) -> tuple[bool, str]:
+    try:
+        inner_opts = " ".join(shlex.quote(part) for part in SSH_AUTO_OPTS)
+        completed = subprocess.run(
+            ["ssh", *SSH_AUTO_OPTS, jump, f"cat | ssh {inner_opts} {shlex.quote(host)} sh -s"],
+            input=script,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        return completed.returncode == 0, completed.stdout.strip()
+    except subprocess.TimeoutExpired as exc:
+        return False, (exc.stdout or "timeout").strip()
+
+
 def ssh_jump_check(jump: str, host: str, command: str, timeout: int = 10) -> tuple[bool, str]:
     inner_opts = " ".join(shlex.quote(part) for part in SSH_AUTO_OPTS)
     remote_cmd = f"ssh {inner_opts} {shlex.quote(host)} {shlex.quote(command)}"
     code, out = capture(["ssh", *SSH_AUTO_OPTS, jump, remote_cmd], timeout=timeout)
     return code == 0, out
+
+
+KILL_SCRIPT = """\
+kill_pids()
+{
+    label=$1
+    pids=$2
+    if [ -z "$pids" ]; then
+        echo "$label: not running"
+        return 0
+    fi
+    echo "$label: stopping $pids"
+    kill $pids 2>/dev/null || true
+    i=0
+    while [ $i -lt 5 ]; do
+        alive=
+        for pid in $pids; do
+            if kill -0 "$pid" 2>/dev/null; then
+                alive="$alive $pid"
+            fi
+        done
+        if [ -z "$alive" ]; then
+            echo "$label: stopped"
+            return 0
+        fi
+        sleep 1
+        i=$((i + 1))
+    done
+    echo "$label: killing$alive"
+    kill -KILL $alive 2>/dev/null || true
+}
+"""
+
+
+def _kill_cmd(label: str, pgrep_name: str | None = None, awk_pattern: str | None = None) -> str:
+    if pgrep_name:
+        return (
+            f"pids=$(pgrep -x {shlex.quote(pgrep_name)} "
+            f"2>/dev/null | tr '\\n' ' ' || true)\n"
+            f"kill_pids {shlex.quote(label)} \"$pids\""
+        )
+    if awk_pattern:
+        return (
+            f"pids=$(ps -eo pid,args | awk {shlex.quote(awk_pattern)} "
+            f"| tr '\\n' ' ')\n"
+            f"kill_pids {shlex.quote(label)} \"$pids\""
+        )
+    raise StandError("need pgrep_name or awk_pattern")
+
+
+def remote_kill(host: str, label: str, pgrep_name: str, timeout: int = 20) -> None:
+    _, out = ssh_script(host, KILL_SCRIPT + _kill_cmd(label, pgrep_name=pgrep_name), timeout=timeout)
+    if out:
+        print(out)
+
+
+def remote_kill_via_jump(
+    jump: str,
+    host: str,
+    label: str,
+    pgrep_name: str,
+    timeout: int = 20,
+) -> None:
+    _, out = ssh_jump_script(jump, host, KILL_SCRIPT + _kill_cmd(label, pgrep_name=pgrep_name), timeout=timeout)
+    if out:
+        print(out)
+
+
+def remote_kill_pattern(
+    host: str,
+    label: str,
+    awk_pattern: str,
+    timeout: int = 20,
+) -> None:
+    _, out = ssh_script(host, KILL_SCRIPT + _kill_cmd(label, awk_pattern=awk_pattern), timeout=timeout)
+    if out:
+        print(out)
+
+
+def remote_kill_pattern_via_jump(
+    jump: str,
+    host: str,
+    label: str,
+    awk_pattern: str,
+    timeout: int = 20,
+) -> None:
+    _, out = ssh_jump_script(jump, host, KILL_SCRIPT + _kill_cmd(label, awk_pattern=awk_pattern), timeout=timeout)
+    if out:
+        print(out)
 
 
 def http_check(url: str, timeout: int = 3) -> bool:
