@@ -167,7 +167,17 @@ http://127.0.0.1:3001/d/rt-trace-stages
 
 В dashboard выберите `session_id`, напечатанный `test-trace`.
 
-## 8. Частые Команды
+## 8. Посмотреть Trace Summary
+
+```bash
+scripts/stand.py trace-summary
+scripts/stand.py trace-summary --session-id 810963
+```
+
+`trace-summary` показывает каждый host/stage: количество групп, среднюю,
+минимальную и максимальную задержку в микросекундах.
+
+## 9. Частые Команды
 
 ```bash
 scripts/stand.py start

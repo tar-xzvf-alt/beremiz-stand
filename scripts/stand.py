@@ -309,6 +309,23 @@ def cmd_test_trace(cfg: configparser.ConfigParser, args: argparse.Namespace) -> 
         cleanup_temp(tmp_path)
 
 
+def cmd_trace_summary(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
+    db_path = args.db or opt(cfg, "measurement", "trace_db", "/tmp/rt-tester-supervised-smoke.db")
+    return run(
+        [
+            sys.executable,
+            str(
+                Path(get(cfg, "pc", "rt_tester_dir"))
+                / "src"
+                / "pc-receiver"
+                / "trace_summary.py"
+            ),
+            db_path,
+        ]
+        + (["--session-id", str(args.session_id)] if args.session_id else [])
+    )
+
+
 def cmd_sync_stand(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
     return run_or_dry(
         [script("sync_to_visionfive.sh"), supervisor(cfg), beremiz_stand_dir(cfg)],
@@ -1489,6 +1506,11 @@ def build_parser() -> argparse.ArgumentParser:
     smoke = sub.add_parser("test-smoke", help="run non-trace smoke measurement")
     add_measurement_options(smoke)
     smoke.set_defaults(func=cmd_test_smoke)
+
+    trace_summary = sub.add_parser("trace-summary", help="print trace stage breakdown")
+    trace_summary.add_argument("--db", help="path to smoke SQLite database")
+    trace_summary.add_argument("--session-id", type=int, help="session ID to summarize (default: latest)")
+    trace_summary.set_defaults(func=cmd_trace_summary)
 
     trace = sub.add_parser("test-trace", help="run trace smoke measurement")
     add_measurement_options(trace)
