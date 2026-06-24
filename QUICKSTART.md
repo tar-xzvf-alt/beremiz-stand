@@ -172,10 +172,11 @@ http://127.0.0.1:3001/d/rt-trace-stages
 ```bash
 scripts/stand.py trace-summary
 scripts/stand.py trace-summary --session-id 810963
+scripts/stand.py trace-summary --all
 ```
 
-`trace-summary` показывает каждый host/stage: количество групп, среднюю,
-минимальную и максимальную задержку в микросекундах.
+По умолчанию показывает только стадии VisionFive (плата с Beremiz).
+С `--all` добавляются стадии RockPI.
 
 ## 9. Частые Команды
 
