@@ -268,8 +268,32 @@ def cmd_stop(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
 
 
 def cmd_check(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
-    env = {"ERPC_URL": get(cfg, "supervisor", "erpc_url")}
-    return run([script("check_supervised_stack.sh"), supervisor(cfg), controller(cfg)], env=env)
+    sup = supervisor(cfg)
+    ctrl = controller(cfg)
+    jump = get(cfg, "controller", "ssh_jump")
+
+    erpc_cmd = (
+        f"python3 {shlex.quote(beremiz_stand_dir(cfg) + '/scripts/check_runtime_status.py')} "
+        f"{shlex.quote(get(cfg, 'supervisor', 'erpc_url'))}"
+    )
+
+    print("== ERPC runtime ==")
+    _, out = ssh_check(sup, erpc_cmd, timeout=10)
+    print(out)
+
+    print()
+    print("== VisionFive processes ==")
+    _, out = ssh_script(sup, VISIONFIVE_CHECK)
+    if out:
+        print(out)
+
+    print()
+    print("== RockPI processes ==")
+    _, out = ssh_jump_script(jump, ctrl, ROCKPI_CHECK)
+    if out:
+        print(out)
+
+    return 0
 
 
 def cmd_trace_start(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
@@ -1032,6 +1056,76 @@ else
         "$INTERFACE" "$CONTROLLER_BIN" >/root/controller-emu.log 2>&1 &
 fi
 echo "controller-emu pid=$!"
+"""
+
+VISIONFIVE_CHECK = """\
+set -eu
+supervisor_pids=$(pgrep -x alt-rt-supervis 2>/dev/null | tr '\\n' ' ' || true)
+runtime_pids=$(ps -eo pid,args | awk '/[B]eremiz_service.py/ { print $1 }' | tr '\\n' ' ')
+
+print_processes()
+{
+    label=$1
+    pids=$2
+    if [ -z "$pids" ]; then
+        echo "$label: missing"
+        return 1
+    fi
+    pid_csv=$(printf '%s\\n' $pids | paste -sd, -)
+    echo "$label: $pids"
+    ps -o pid,cls,rtprio,pri,psr,comm,args -p "$pid_csv"
+    ps -L -o pid,tid,cls,rtprio,pri,psr,comm -p "$pid_csv"
+    for pid in $pids; do
+        awk '/Cpus_allowed_list/ { print "pid " pid " Cpus_allowed_list=" $2 }' \
+            pid="$pid" "/proc/$pid/status"
+        for status in /proc/$pid/task/*/status; do
+            [ -e "$status" ] || continue
+            tid=${status%/status}
+            tid=${tid##*/}
+            awk '/Cpus_allowed_list/ { print "tid " tid " Cpus_allowed_list=" $2 }' \
+                tid="$tid" "$status"
+        done
+    done
+}
+
+failed=0
+print_processes "alt-rt-supervisor" "$supervisor_pids" || failed=1
+print_processes "Beremiz_service.py" "$runtime_pids" || failed=1
+
+for slot in /dev/shm/shmem_input /dev/shm/shmem_output; do
+    if [ -e "$slot" ]; then
+        ls -l "$slot"
+    else
+        echo "$slot: missing"
+        failed=1
+    fi
+done
+
+exit "$failed"
+"""
+
+ROCKPI_CHECK = """\
+set -eu
+pids=$(pgrep -x controller-emu 2>/dev/null | tr '\\n' ' ' || true)
+if [ -z "$pids" ]; then
+    echo "controller-emu: missing"
+    exit 1
+fi
+pid_csv=$(printf '%s\\n' $pids | paste -sd, -)
+echo "controller-emu: $pids"
+ps -o pid,cls,rtprio,pri,psr,comm,args -p "$pid_csv"
+ps -L -o pid,tid,cls,rtprio,pri,psr,comm -p "$pid_csv"
+for pid in $pids; do
+    awk '/Cpus_allowed_list/ { print "pid " pid " Cpus_allowed_list=" $2 }' \
+        pid="$pid" "/proc/$pid/status"
+    for status in /proc/$pid/task/*/status; do
+        [ -e "$status" ] || continue
+        tid=${status%/status}
+        tid=${tid##*/}
+        awk '/Cpus_allowed_list/ { print "tid " tid " Cpus_allowed_list=" $2 }' \
+            tid="$tid" "$status"
+    done
+done
 """
 
 
