@@ -2686,8 +2686,8 @@ def build_parser() -> argparse.ArgumentParser:
     deploy.set_defaults(func=cmd_deploy_rt_supervisor)
 
     build = sub.add_parser("build-rt-supervisor", help="build rt-supervisor on boards")
-    build.add_argument("--supervisor-only", action="store_true", help="only build VisionFive")
-    build.add_argument("--controller-only", action="store_true", help="only build RockPI")
+    build.add_argument("--supervisor-only", action="store_true", help="only build supervisor")
+    build.add_argument("--controller-only", action="store_true", help="only build controller")
     build.add_argument("--clean-first", action="store_true", help="pass --clean-first to cmake build")
     build.add_argument("--dry-run", action="store_true", help="print remote build commands")
     build.set_defaults(func=cmd_build_rt_supervisor)
