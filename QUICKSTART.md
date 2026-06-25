@@ -201,10 +201,12 @@ scripts/stand.py trace-start
 scripts/stand.py trace-stop
 scripts/stand.py grafana-start
 scripts/stand.py grafana-stop
+scripts/stand.py trace-summary
+scripts/stand.py test-ab
 scripts/stand.py collect-logs
 ```
 
-## 9. Другой Profile
+## 10. Другой Profile
 
 Скопируйте текущий profile и поменяйте IP/пути/board names:
 
@@ -213,7 +215,7 @@ cp profiles/visionfive-rockpi.conf profiles/my-stand.conf
 scripts/stand.py --profile profiles/my-stand.conf doctor
 ```
 
-## 10. Остановить Все После Тестов
+## 11. Остановить Все После Тестов
 
 ```bash
 scripts/stand.py stop
@@ -221,9 +223,8 @@ scripts/stand.py trace-stop
 scripts/stand.py grafana-stop
 ```
 
-## Что Пока Осталось В Shell Scripts
+## Shell Scripts
 
-В этом milestone `stand.py` является удобным orchestration layer поверх старых
-shell scripts. Это сделано намеренно: текущие проверенные команды остаются
-рабочими, а пользователь получает одну точку входа. Следующий milestone будет
-постепенно переносить логику из shell scripts внутрь Python orchestrator.
+Все shell-скрипты в `scripts/` теперь являются compatibility wrappers,
+передающими вызов в `scripts/stand.py`. Полная логика стенда находится
+в Python внутри `stand.py`.

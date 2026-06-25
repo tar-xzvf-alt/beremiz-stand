@@ -89,10 +89,16 @@ apt-get install python3 openssh-clients openssh-server tar git gcc make binutils
 ## 4. Остановить Старый Stack
 
 ```bash
+scripts/stand.py stop
+```
+
+Или напрямую:
+
+```bash
 scripts/stop_supervised_stack.sh
 ```
 
-Скрипт останавливает только точные процессы `controller-emu`, `alt-rt-supervisor` и `Beremiz_service.py`.
+Скрипты останавливают только точные процессы `controller-emu`, `alt-rt-supervisor`, `Beremiz_service.py` и `trace_exporter.py`.
 
 ## 5. Передать Проект На VisionFive
 
@@ -129,16 +135,22 @@ scripts/stop_runtime_on_visionfive.sh
 
 ## 8. Запустить Supervised Stack
 
-Для GUI-наблюдения используйте длинный watchdog timeout:
+Рекомендуемый способ — через `scripts/stand.py start`:
+
+```bash
+scripts/stand.py start
+```
+
+Для GUI-наблюдения используйте длинный watchdog timeout через env:
+
+```bash
+TIMEOUT_US=30000000 scripts/stand.py start
+```
+
+Или старый способ напрямую:
 
 ```bash
 TIMEOUT_US=30000000 scripts/start_supervised_stack.sh
-```
-
-Для чистых измерений без GUI можно использовать default timeout:
-
-```bash
-scripts/start_supervised_stack.sh
 ```
 
 Скрипт запускает:
@@ -266,80 +278,16 @@ cd /home/taranev/work_repos/rt/rt-tester/src/pc-receiver
 python3 receiver.py --params measurement.conf --start --exit-on-stop
 ```
 
-Короткий supervised smoke на 3 группы можно запускать из этого проекта:
+Короткий supervised smoke на 2 группы:
 
 ```bash
-scripts/run_supervised_smoke.sh
+scripts/stand.py test-smoke --groups 2
+scripts/stand.py test-trace --groups 2
 ```
 
-Скрипт заново запускает supervised stack с `TIMEOUT_US=30000000`, проверяет
-процессы/RT priorities/shared memory через `scripts/check_supervised_stack.sh`,
-запускает `rt-tester` receiver с
-`src/pc-receiver/measurement-supervised-smoke.conf` и печатает summary из
-SQLite DB. Если stack уже запущен и его не нужно перезапускать:
-
-```bash
-SKIP_START=1 scripts/run_supervised_smoke.sh
-```
-
-Количество групп smoke можно изменить без правки config:
-
-```bash
-SMOKE_GROUPS=10 scripts/run_supervised_smoke.sh
-```
-
-Точный протокол sanity, trace и A/B overhead тестов описан в
-`TEST_PROTOCOL.md`.
-
-Trace-разбивка по стадиям включается тем же smoke script. Он передаёт один
-`SESSION_ID` в receiver, supervisor и controller, а controller добавляет в BETH
-payload `session_id`, `group_index` и `measurements-per-group`. На платах
-пишутся JSONL summaries и запускаются `trace_exporter.py` на порту `9201`.
-
-Prometheus должен scrape-ить:
-
-```text
-RockPI trace exporter:     10.43.0.2:9201
-VisionFive trace exporter: 10.43.0.1:9201
-```
-
-Если Prometheus доступен с ПК, trace metrics можно импортировать в SQLite сразу
-после smoke:
-
-```bash
-TRACE_MODE=prometheus \
-TRACE_PROMETHEUS_URL=http://localhost:9090 \
-  scripts/run_supervised_smoke.sh
-```
-
-Если ПК не имеет маршрута в сеть `10.43.0.0/24`, используйте SSH tunnels из
-`rt-tester/prometheus/trace-prometheus-local-tunnel.yml` и запускайте smoke с:
-
-```bash
-scripts/start_trace_prometheus_local.sh
-TRACE_MODE=prometheus \
-TRACE_PROMETHEUS_URL=http://127.0.0.1:9091 \
-  scripts/run_supervised_smoke.sh
-scripts/stop_trace_prometheus_local.sh
-```
-
-Для baseline без trace используйте:
-
-```bash
-TRACE_MODE=off scripts/run_supervised_smoke.sh
-```
-
-Для проверки overhead сразу в трех режимах:
-
-```bash
-scripts/start_trace_prometheus_local.sh
-AB_GROUPS=2 AB_REPEATS=1 scripts/run_supervised_ab_overhead.sh
-scripts/stop_trace_prometheus_local.sh
-```
-
-Импорт сохраняет агрегаты по `(session_id, group_index, host, stage)` в таблицу
-`trace_group_metrics`. Между RockPI и VisionFive timestamps напрямую не
-вычитаются; сохраняются только durations внутри одного host.
+Trace-разбивка по стадиям включается командой `test-trace`. Она запускает
+локальный trace Prometheus, стартует стек с trace exporters, выполняет
+измерение, импортирует trace metrics в SQLite и печатает summary.
 
 Для ручного режима можно запустить без `--start --exit-on-stop` и вводить
 `start`, `status`, `events`, `stop`, `exit` в интерактивной консоли.
@@ -349,8 +297,8 @@ scripts/stop_trace_prometheus_local.sh
 ## 13. Остановить Стенд
 
 ```bash
-scripts/stop_supervised_stack.sh
-```
+scripts/stand.py stop
+scripts/stand.py trace-stop
 
 Если нужно остановить только временный standalone runtime:
 
@@ -363,21 +311,21 @@ scripts/stop_runtime_on_visionfive.sh
 `Не удалось открыть/прочитать VARIABLES.csv`:
 
 ```bash
-scripts/sync_supervised_debug_build_from_visionfive.sh
+scripts/stand.py sync-plc-debug-build
 ```
 
 `Отлаживаемая программа не соответствует программе в ПЛК`:
 
 ```bash
-scripts/build_supervised_raw_on_visionfive.sh
-scripts/deploy_run_supervised_raw_on_visionfive_runtime.sh
-scripts/sync_supervised_debug_build_from_visionfive.sh
+scripts/stand.py build-plc
+scripts/stand.py deploy-plc
+scripts/stand.py sync-plc-debug-build
 ```
 
 GUI подключается и быстро отваливается:
 
 ```bash
-TIMEOUT_US=30000000 scripts/start_supervised_stack.sh
+TIMEOUT_US=30000000 scripts/stand.py start
 ```
 
 Проверить текущий timeout supervisor:

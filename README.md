@@ -30,15 +30,10 @@ RockPI end0 10.43.0.2 <-> VisionFive end0 10.43.0.1
 | Path | Что это |
 | --- | --- |
 | `beremiz-project/supervised-raw-plc/` | единственный Beremiz PLC project |
-| `scripts/sync_to_visionfive.sh` | копирует репозиторий на VisionFive |
-| `scripts/build_supervised_raw_on_visionfive.sh` | собирает PLC на VisionFive |
-| `scripts/start_runtime_on_visionfive.sh` | временно запускает Beremiz runtime для загрузки PLC |
-| `scripts/deploy_run_supervised_raw_on_visionfive_runtime.sh` | загружает PLC в runtime |
-| `scripts/install_supervised_runtime_wrapper_on_visionfive.sh` | ставит wrapper для запуска runtime из supervisor |
-| `scripts/start_supervised_stack.sh` | запускает supervisor на VisionFive и controller на RockPI |
-| `scripts/stop_supervised_stack.sh` | останавливает весь supervised stack |
-| `scripts/sync_supervised_debug_build_from_visionfive.sh` | подтягивает `build/VARIABLES.csv` для GUI-debug |
+| `scripts/stand.py` | единая CLI точка входа для всех операций стенда |
+| `scripts/*.sh` | compatibility wrappers, передающие вызов в `stand.py` |
 | `scripts/check_runtime_status.py` | проверяет `PLC Status` через ERPC |
+| `profiles/visionfive-rockpi.conf` | конфигурация стенда (IP, пути, board names) |
 
 `rt-supervisor` находится здесь: https://altlinux.space/besogon1238/rt-supervisor
 
@@ -102,19 +97,20 @@ apt-get install python3 openssh-clients openssh-server tar git gcc make binutils
 Для обычного пользователя сначала смотрите [QUICKSTART.md](QUICKSTART.md): там
 описан запуск через единый `scripts/stand.py`.
 
-Подробные ручные команды находятся в [GUIDE.md](GUIDE.md). Короткий порядок:
+Подробные ручные команды находятся в [GUIDE.md](GUIDE.md). Короткий порядок
+через `stand.py`:
 
 ```bash
-scripts/stop_supervised_stack.sh
-scripts/sync_to_visionfive.sh
-scripts/build_supervised_raw_on_visionfive.sh
-scripts/start_runtime_on_visionfive.sh
-scripts/deploy_run_supervised_raw_on_visionfive_runtime.sh
-scripts/install_supervised_runtime_wrapper_on_visionfive.sh
-scripts/stop_runtime_on_visionfive.sh
-TIMEOUT_US=30000000 scripts/start_supervised_stack.sh
-scripts/sync_supervised_debug_build_from_visionfive.sh
-/usr/bin/python3 scripts/check_runtime_status.py ERPC://10.42.0.211:3000
+scripts/stand.py stop
+scripts/stand.py sync-stand
+scripts/stand.py build-plc
+scripts/stand.py start-runtime
+scripts/stand.py deploy-plc
+scripts/stand.py install-runtime-wrapper
+scripts/stand.py stop-runtime
+TIMEOUT_US=30000000 scripts/stand.py start
+scripts/stand.py sync-plc-debug-build
+scripts/stand.py check
 ```
 
 После этого можно открывать GUI:

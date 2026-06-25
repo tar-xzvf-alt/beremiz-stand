@@ -150,30 +150,6 @@ def runtime_port(cfg: configparser.ConfigParser) -> str:
     return opt(cfg, "supervisor", "runtime_port", "3000")
 
 
-def smoke_env(
-    cfg: configparser.ConfigParser,
-    args: argparse.Namespace,
-    trace_mode: str,
-    params_path: Path,
-) -> dict[str, str]:
-    env = {
-        "RT_TESTER_DIR": get(cfg, "pc", "rt_tester_dir"),
-        "ARDUINO_PORT": args.arduino_port or get(cfg, "pc", "arduino_port"),
-        "SMOKE_GROUPS": str(args.groups or get(cfg, "measurement", "groups")),
-        "SMOKE_PARAMS": str(params_path),
-        "SUPERVISOR_BIN": get(cfg, "supervisor", "supervisor_bin"),
-        "CONTROLLER_BIN": get(cfg, "controller", "controller_bin"),
-        "RECEIVER_TIMEOUT_SEC": str(
-            args.receiver_timeout_sec
-            or opt(cfg, "measurement", "receiver_timeout_sec", "120")
-        ),
-        "TRACE_MODE": trace_mode,
-    }
-    if trace_mode == "prometheus":
-        env["TRACE_PROMETHEUS_URL"] = get(cfg, "pc", "trace_prometheus_url")
-    return env
-
-
 def read_params(path: Path) -> list[str]:
     if not path.is_file():
         raise StandError(f"measurement params not found: {path}")

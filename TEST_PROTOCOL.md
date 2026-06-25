@@ -59,7 +59,7 @@ ARDUINO_PORT=/dev/ttyACM1 scripts/run_supervised_smoke.sh
 Запустить стенд без trace и сделать короткий smoke:
 
 ```bash
-TRACE_MODE=off SMOKE_GROUPS=2 scripts/run_supervised_smoke.sh
+scripts/stand.py test-smoke --groups 2
 ```
 
 Ожидаемые признаки успеха:
@@ -69,7 +69,6 @@ PLC Status: Started
 trace_mode=off
 groups=2
 latencies=150
-```
 
 Если `measurement-supervised-smoke.conf` настроен на 1500 измерений в группе,
 то для `SMOKE_GROUPS=2` Arduino выполнит 3000 физических измерений, а receiver
@@ -87,10 +86,7 @@ scripts/start_trace_prometheus_local.sh
 Проверить trace smoke с импортом в SQLite:
 
 ```bash
-TRACE_MODE=prometheus \
-TRACE_PROMETHEUS_URL=http://127.0.0.1:9091 \
-SMOKE_GROUPS=2 \
-  scripts/run_supervised_smoke.sh
+scripts/stand.py test-trace --groups 2
 ```
 
 Ожидаемые признаки успеха:
@@ -108,7 +104,7 @@ trace=visionfive/runtime_wait: groups=2 ...
 Остановить локальный Prometheus и tunnels:
 
 ```bash
-scripts/stop_trace_prometheus_local.sh
+scripts/stand.py trace-stop
 ```
 
 ## Trace В Grafana
@@ -117,17 +113,14 @@ scripts/stop_trace_prometheus_local.sh
 provisioned dashboard из `rt-tester/grafana`:
 
 ```bash
-scripts/start_trace_prometheus_local.sh
-scripts/start_trace_grafana_local.sh
+scripts/stand.py trace-start
+scripts/stand.py grafana-start
 ```
 
 Затем запустите trace smoke:
 
 ```bash
-TRACE_MODE=prometheus \
-TRACE_PROMETHEUS_URL=http://127.0.0.1:9091 \
-SMOKE_GROUPS=2 \
-  scripts/run_supervised_smoke.sh
+scripts/stand.py test-trace --groups 2
 ```
 
 Откройте:
@@ -157,31 +150,23 @@ scripts/stop_trace_grafana_local.sh
 Перед серией включите локальный trace Prometheus:
 
 ```bash
-scripts/start_trace_prometheus_local.sh
+scripts/stand.py trace-start
 ```
 
 Запустить короткую A/B серию:
 
 ```bash
-AB_GROUPS=2 AB_REPEATS=1 scripts/run_supervised_ab_overhead.sh
+scripts/stand.py test-ab --ab-groups 2 --ab-repeats 1
 ```
-
-Скрипт последовательно запускает:
-
-| Mode | Что включено |
-| --- | --- |
-| `off` | только supervised stack и receiver, trace полностью выключен |
-| `jsonl` | trace JSONL на платах, exporters и Prometheus выключены |
-| `prometheus` | trace JSONL, exporters, Prometheus scrape и импорт в SQLite |
 
 Для более устойчивой оценки используйте минимум 5 повторов:
 
 ```bash
-AB_GROUPS=10 AB_REPEATS=5 scripts/run_supervised_ab_overhead.sh
+scripts/stand.py test-ab --ab-groups 10 --ab-repeats 5
 ```
 
-Результаты сохраняются в `/tmp/rt-supervised-ab-YYYYMMDD-HHMMSS/`. В конце
-печатается summary по каждому run:
+Результаты сохраняются в `/tmp/rt-supervised-ab-*`. В конце
+печатается summary по каждому run.
 
 ```text
 1-off: trace_mode=off; session=...; groups=...; latencies=...; latency_min_avg_max_us=...
@@ -204,32 +189,19 @@ scripts/summarize_ab_overhead.py /tmp/rt-supervised-ab-YYYYMMDD-HHMMSS
 
 ## Ручной Просмотр Trace Summary
 
-Smoke database обычно лежит здесь:
-
-```text
-/tmp/rt-tester-supervised-smoke.db
-```
-
-Для конкретной session:
-
 ```bash
-cd /home/taranev/work_repos/rt/rt-tester/src/pc-receiver
-python3 trace_summary.py /tmp/rt-tester-supervised-smoke.db --session-id SESSION_ID
+scripts/stand.py trace-summary
+scripts/stand.py trace-summary --session-id SESSION_ID
 ```
-
-`SESSION_ID` печатается каждым `run_supervised_smoke.sh`.
 
 ## Остановка Стенда
 
 После тестов:
 
 ```bash
-scripts/stop_supervised_stack.sh
-scripts/stop_trace_prometheus_local.sh
+scripts/stand.py stop
+scripts/stand.py trace-stop
 ```
-
-`stop_supervised_stack.sh` останавливает только точные процессы supervised stack и
-trace exporters, не используя `pkill -f`.
 
 ## Что Сохранять В Отчет
 
