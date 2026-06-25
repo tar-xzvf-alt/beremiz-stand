@@ -150,6 +150,32 @@ def runtime_port(cfg: configparser.ConfigParser) -> str:
     return opt(cfg, "supervisor", "runtime_port", "3000")
 
 
+def supervisor_label(cfg: configparser.ConfigParser) -> str:
+    return opt(cfg, "supervisor", "label", "supervisor")
+
+
+def controller_label(cfg: configparser.ConfigParser) -> str:
+    return opt(cfg, "controller", "label", "controller")
+
+
+def supervisor_pinning(cfg: configparser.ConfigParser) -> str:
+    return opt(
+        cfg,
+        "supervisor",
+        "pinning_script",
+        "/root/pin_visionfive_supervised.sh",
+    )
+
+
+def controller_pinning(cfg: configparser.ConfigParser) -> str:
+    return opt(
+        cfg,
+        "controller",
+        "pinning_script",
+        "/root/pin_rockpi_controller.sh",
+    )
+
+
 def read_params(path: Path) -> list[str]:
     if not path.is_file():
         raise StandError(f"measurement params not found: {path}")
@@ -272,13 +298,13 @@ def cmd_check(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
     print(out)
 
     print()
-    print("== VisionFive processes ==")
+    print(f"== {supervisor_label(cfg)} processes ==")
     _, out = ssh_script(sup, VISIONFIVE_CHECK)
     if out:
         print(out)
 
     print()
-    print("== RockPI processes ==")
+    print(f"== {controller_label(cfg)} processes ==")
     _, out = ssh_jump_script(jump, ctrl, ROCKPI_CHECK)
     if out:
         print(out)
@@ -386,22 +412,28 @@ def cmd_trace_start(cfg: configparser.ConfigParser, _args: argparse.Namespace) -
     runtime.mkdir(parents=True, exist_ok=True)
     data_dir.mkdir(parents=True, exist_ok=True)
 
+    ctrl_addr_host = addr_host(get(cfg, "controller", "addr"))
     vf_forward = "19201:127.0.0.1:9201"
-    rp_forward = "19202:10.43.0.2:9201"
+    rp_forward = f"19202:{ctrl_addr_host}:9201"
+
+    sup_label = supervisor_label(cfg)
+    ctrl_label = controller_label(cfg)
+    sup_key = sup_label.lower()
+    ctrl_key = ctrl_label.lower()
 
     _local_start_tunnel(
-        "visionfive",
-        runtime / "visionfive-tunnel.pid",
+        sup_key,
+        runtime / f"{sup_key}-tunnel.pid",
         vf_forward,
         sup,
-        runtime / "visionfive.log",
+        runtime / f"{sup_key}.log",
     )
     _local_start_tunnel(
-        "rockpi",
-        runtime / "rockpi-tunnel.pid",
+        ctrl_key,
+        runtime / f"{ctrl_key}-tunnel.pid",
         rp_forward,
         sup,
-        runtime / "rockpi.log",
+        runtime / f"{ctrl_key}.log",
     )
 
     prom_pid_file = runtime / "prometheus.pid"
@@ -439,7 +471,7 @@ def cmd_trace_start(cfg: configparser.ConfigParser, _args: argparse.Namespace) -
     if not http_check(f"http://{prom_addr}/-/ready", timeout=10):
         raise StandError(f"trace Prometheus not ready at {prom_addr}")
 
-    for label, port in ("VisionFive", "19201"), ("RockPI", "19202"):
+    for label, port in (sup_label, "19201"), (ctrl_label, "19202"):
         if not http_check(f"http://127.0.0.1:{port}/metrics", timeout=5):
             print(
                 f"trace exporter is not ready at "
@@ -450,11 +482,17 @@ def cmd_trace_start(cfg: configparser.ConfigParser, _args: argparse.Namespace) -
     return 0
 
 
-def cmd_trace_stop(_cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
+def cmd_trace_stop(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
     runtime = Path(_TRACE_PROM_RUNTIME)
+    sup_key = supervisor_label(cfg).lower()
+    ctrl_key = controller_label(cfg).lower()
     _local_stop_pid_file("trace Prometheus", runtime / "prometheus.pid")
-    _local_stop_pid_file("RockPI tunnel", runtime / "rockpi-tunnel.pid")
-    _local_stop_pid_file("VisionFive tunnel", runtime / "visionfive-tunnel.pid")
+    _local_stop_pid_file(
+        f"{controller_label(cfg)} tunnel", runtime / f"{ctrl_key}-tunnel.pid"
+    )
+    _local_stop_pid_file(
+        f"{supervisor_label(cfg)} tunnel", runtime / f"{sup_key}-tunnel.pid"
+    )
     return 0
 
 
@@ -817,8 +855,8 @@ def cmd_trace_summary(cfg: configparser.ConfigParser, args: argparse.Namespace) 
     ]
     if args.session_id:
         cmd += ["--session-id", str(args.session_id)]
-    if not args.all:
-        cmd += ["--host", "visionfive"]
+    if args.host:
+        cmd += ["--host", args.host]
     return run(cmd)
 
 
@@ -1539,6 +1577,8 @@ def ssh_jump_script(
     shell_args: list[str] | None = None,
 ) -> tuple[bool, str]:
     try:
+        if jump == host:
+            return ssh_script(host, script, timeout=timeout)
         inner_opts = " ".join(shlex.quote(part) for part in SSH_AUTO_OPTS)
         args_suffix = ""
         if shell_args:
@@ -1561,6 +1601,8 @@ def ssh_jump_script(
 
 
 def ssh_jump_check(jump: str, host: str, command: str, timeout: int = 10) -> tuple[bool, str]:
+    if jump == host:
+        return ssh_check(host, command, timeout=timeout)
     inner_opts = " ".join(shlex.quote(part) for part in SSH_AUTO_OPTS)
     remote_cmd = f"ssh {inner_opts} {shlex.quote(host)} {shlex.quote(command)}"
     code, out = capture(["ssh", *SSH_AUTO_OPTS, jump, remote_cmd], timeout=timeout)
@@ -1863,10 +1905,10 @@ def _start_stack(
         print(out)
 
     time.sleep(4)
-    _, out = ssh_check(sup, "/root/pin_visionfive_supervised.sh", timeout=10)
+    _, out = ssh_check(sup, supervisor_pinning(cfg), timeout=10)
     if out:
         print(out)
-    _, out = ssh_jump_check(jump, ctrl, "/root/pin_rockpi_controller.sh", timeout=10)
+    _, out = ssh_jump_check(jump, ctrl, controller_pinning(cfg), timeout=10)
     if out:
         print(out)
 
@@ -2563,9 +2605,8 @@ def build_parser() -> argparse.ArgumentParser:
     trace_summary.add_argument("--db", help="path to smoke SQLite database")
     trace_summary.add_argument("--session-id", type=int, help="session ID to summarize (default: latest)")
     trace_summary.add_argument(
-        "--all",
-        action="store_true",
-        help="show all hosts (default: visionfive only)",
+        "--host",
+        help="filter by host name (default: all hosts)",
     )
     trace_summary.set_defaults(func=cmd_trace_summary)
 
