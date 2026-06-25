@@ -1285,45 +1285,49 @@ def cmd_collect_logs(cfg: configparser.ConfigParser, args: argparse.Namespace) -
     code, out = capture(time_cmd, timeout=60)
     write_command_output(outdir / "time_check.txt", time_cmd, code, out)
 
-    visionfive_logs = [
+    sup_label = supervisor_label(cfg)
+    ctrl_label = controller_label(cfg)
+    sup_logs = [
         "/root/alt-rt-supervisor.log",
         f"{runtime_dir(cfg)}/beremiz_service.log",
         "/root/rt-trace-exporter.log",
         "/tmp/rt-supervisor-trace.jsonl",
     ]
+    sup_key = sup_label.lower()
     code, out = capture(
         [
             "ssh",
             *SSH_AUTO_OPTS,
             supervisor(cfg),
-            remote_log_command(visionfive_logs, args.lines),
+            remote_log_command(sup_logs, args.lines),
         ],
         timeout=60,
     )
     write_command_output(
-        outdir / "visionfive.txt",
+        outdir / f"{sup_key}.txt",
         ["ssh", supervisor(cfg), "<snapshot>"],
         code,
         out,
     )
 
-    rockpi_logs = [
+    ctrl_logs = [
         "/root/controller-emu.log",
         "/root/rt-trace-exporter.log",
         "/tmp/controller-emu-trace.jsonl",
     ]
+    ctrl_key = ctrl_label.lower()
     inner_opts = " ".join(shlex.quote(part) for part in SSH_AUTO_OPTS)
-    rockpi_command = remote_log_command(rockpi_logs, args.lines)
+    ctrl_command = remote_log_command(ctrl_logs, args.lines)
     remote_cmd = (
         f"ssh {inner_opts} {shlex.quote(controller(cfg))} "
-        f"{shlex.quote(rockpi_command)}"
+        f"{shlex.quote(ctrl_command)}"
     )
     code, out = capture(
         ["ssh", *SSH_AUTO_OPTS, get(cfg, "controller", "ssh_jump"), remote_cmd],
         timeout=60,
     )
     write_command_output(
-        outdir / "rockpi.txt",
+        outdir / f"{ctrl_key}.txt",
         ["ssh", get(cfg, "controller", "ssh_jump"), "ssh", controller(cfg), "<snapshot>"],
         code,
         out,
@@ -1988,11 +1992,13 @@ def set_remote_time_via_jump(
 def cmd_time_check(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
     max_skew = args.max_skew_sec
     checks: list[bool] = []
+    sup_label = supervisor_label(cfg)
+    ctrl_label = controller_label(cfg)
 
     print("== Local ==")
     print(datetime.now().astimezone().isoformat())
 
-    print("\n== VisionFive ==")
+    print(f"\n== {sup_label} ==")
     ok, skew, out = remote_time_skew(supervisor(cfg))
     if ok and skew is not None:
         checks.append(
@@ -2000,9 +2006,9 @@ def cmd_time_check(cfg: configparser.ConfigParser, args: argparse.Namespace) -> 
         )
     else:
         print(out)
-        checks.append(print_check(False, "read VisionFive time"))
+        checks.append(print_check(False, f"read {sup_label} time"))
 
-    print("\n== RockPI ==")
+    print(f"\n== {ctrl_label} ==")
     ok, skew, out = remote_time_skew_via_jump(get(cfg, "controller", "ssh_jump"), controller(cfg))
     if ok and skew is not None:
         checks.append(
@@ -2010,7 +2016,7 @@ def cmd_time_check(cfg: configparser.ConfigParser, args: argparse.Namespace) -> 
         )
     else:
         print(out)
-        checks.append(print_check(False, "read RockPI time"))
+        checks.append(print_check(False, f"read {ctrl_label} time"))
 
     failures = sum(1 for ok in checks if not ok)
     if failures:
@@ -2023,18 +2029,20 @@ def cmd_time_check(cfg: configparser.ConfigParser, args: argparse.Namespace) -> 
 def cmd_time_restore(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
     epoch = int(time.time())
     checks: list[bool] = []
+    sup_label = supervisor_label(cfg)
+    ctrl_label = controller_label(cfg)
 
     print(f"== Set board clocks to PC epoch {epoch} ==")
 
-    print("\n== VisionFive ==")
+    print(f"\n== {sup_label} ==")
     ok, out = set_remote_time(supervisor(cfg), epoch)
     print(out)
-    checks.append(print_check(ok, "set VisionFive time"))
+    checks.append(print_check(ok, f"set {sup_label} time"))
 
-    print("\n== RockPI ==")
+    print(f"\n== {ctrl_label} ==")
     ok, out = set_remote_time_via_jump(get(cfg, "controller", "ssh_jump"), controller(cfg), epoch)
     print(out)
-    checks.append(print_check(ok, "set RockPI time"))
+    checks.append(print_check(ok, f"set {ctrl_label} time"))
 
     if not all(checks):
         print("\nTime restore failed")
@@ -2196,6 +2204,8 @@ def cmd_network_check(cfg: configparser.ConfigParser, _args: argparse.Namespace)
     pc_controller_route = get(cfg, "pc", "controller_route")
     pc_controller_gateway = get(cfg, "pc", "controller_gateway")
     sup = supervisor(cfg)
+    sup_label = supervisor_label(cfg)
+    ctrl_label = controller_label(cfg)
     sup_pc_iface = get(cfg, "supervisor", "pc_iface")
     sup_pc_addr = get(cfg, "supervisor", "pc_addr")
     sup_ctrl_iface = get(cfg, "supervisor", "controller_iface")
@@ -2220,34 +2230,34 @@ def cmd_network_check(cfg: configparser.ConfigParser, _args: argparse.Namespace)
         )
     )
 
-    print("\n== PC -> VisionFive ==")
+    print(f"\n== PC -> {sup_label} ==")
     code, out = capture(["ping", "-c", "3", "-W", "2", addr_host(sup_pc_addr)], timeout=10)
     checks.append(print_check(code == 0, f"ping {addr_host(sup_pc_addr)}", out.splitlines()[-1] if out else ""))
     ok, out = ssh_check(sup, f"ip -br addr show {sup_pc_iface}; ip -br addr show {sup_ctrl_iface}")
     print(out)
-    checks.append(print_check(ok and contains_addr(out, sup_pc_addr), f"VisionFive {sup_pc_iface} has {sup_pc_addr}"))
-    checks.append(print_check(ok and contains_addr(out, sup_ctrl_addr), f"VisionFive {sup_ctrl_iface} has {sup_ctrl_addr}"))
+    checks.append(print_check(ok and contains_addr(out, sup_pc_addr), f"{sup_label} {sup_pc_iface} has {sup_pc_addr}"))
+    checks.append(print_check(ok and contains_addr(out, sup_ctrl_addr), f"{sup_label} {sup_ctrl_iface} has {sup_ctrl_addr}"))
     ok, out = ssh_check(sup, "sysctl -n net.ipv4.ip_forward")
-    checks.append(print_check(ok and out.strip() == "1", "VisionFive IPv4 forwarding enabled", out))
+    checks.append(print_check(ok and out.strip() == "1", f"{sup_label} IPv4 forwarding enabled", out))
 
-    print("\n== VisionFive -> RockPI ==")
+    print(f"\n== {sup_label} -> {ctrl_label} ==")
     ok, out = ssh_jump_check(jump, ctrl, f"ip -br addr show {ctrl_iface}")
     print(out)
-    checks.append(print_check(ok and contains_addr(out, ctrl_addr), f"RockPI {ctrl_iface} has {ctrl_addr}"))
+    checks.append(print_check(ok and contains_addr(out, ctrl_addr), f"{ctrl_label} {ctrl_iface} has {ctrl_addr}"))
     ok_route, route_out = ssh_jump_check(jump, ctrl, f"ip route get {addr_host(pc_addr)}")
     print(route_out)
     checks.append(
         print_check(
             ok_route and ctrl_pc_gateway in route_out,
-            f"RockPI route {ctrl_pc_route} via {ctrl_pc_gateway}",
+            f"{ctrl_label} route {ctrl_pc_route} via {ctrl_pc_gateway}",
         )
     )
     ok, out = ssh_check(sup, f"ping -c 3 -W 2 {addr_host(ctrl_addr)}")
-    checks.append(print_check(ok, f"VisionFive ping RockPI {addr_host(ctrl_addr)}", out.splitlines()[-1] if out else ""))
+    checks.append(print_check(ok, f"{sup_label} ping {ctrl_label} {addr_host(ctrl_addr)}", out.splitlines()[-1] if out else ""))
 
-    print("\n== PC -> RockPI Direct ==")
+    print(f"\n== PC -> {ctrl_label} Direct ==")
     code, out = capture(["ping", "-c", "3", "-W", "2", addr_host(ctrl_addr)], timeout=10)
-    checks.append(print_check(code == 0, f"PC ping RockPI {addr_host(ctrl_addr)}", out.splitlines()[-1] if out else ""))
+    checks.append(print_check(code == 0, f"PC ping {ctrl_label} {addr_host(ctrl_addr)}", out.splitlines()[-1] if out else ""))
     code, out = capture(["ssh", *SSH_AUTO_OPTS, controller(cfg), "true"], timeout=10)
     checks.append(print_check(code == 0, f"PC ssh {controller(cfg)}", out))
 
@@ -2273,9 +2283,11 @@ def cmd_network_restore(cfg: configparser.ConfigParser, _args: argparse.Namespac
     )
 
     sup = supervisor(cfg)
+    sup_label = supervisor_label(cfg)
+    ctrl_label = controller_label(cfg)
     ok, out = ssh_check(sup, "true", timeout=5)
     if not ok:
-        print("\nVisionFive is still unreachable over SSH after PC Ethernet restore.")
+        print(f"\n{sup_label} is still unreachable over SSH after PC Ethernet restore.")
         print("Use serial/UART or board console to restore its PC-facing address:")
         print(
             "  "
@@ -2290,7 +2302,7 @@ def cmd_network_restore(cfg: configparser.ConfigParser, _args: argparse.Namespac
         )
         return 1
 
-    print("\n== Restore VisionFive Interfaces ==")
+    print(f"\n== Restore {sup_label} Interfaces ==")
     for connection, iface, addr in (
         (
             get(cfg, "supervisor", "pc_connection"),
@@ -2306,7 +2318,7 @@ def cmd_network_restore(cfg: configparser.ConfigParser, _args: argparse.Namespac
         ok, out = remote_restore_network(sup, connection, iface, addr)
         print(out)
         if not ok:
-            raise StandError(f"failed to restore VisionFive {iface}")
+            raise StandError(f"failed to restore {sup_label} {iface}")
 
     ok, out = remote_enable_ip_forward(
         sup,
@@ -2314,12 +2326,12 @@ def cmd_network_restore(cfg: configparser.ConfigParser, _args: argparse.Namespac
     )
     print(out)
     if not ok:
-        raise StandError("failed to enable VisionFive IPv4 forwarding")
+        raise StandError(f"failed to enable {sup_label} IPv4 forwarding")
 
-    print("\n== Restore RockPI Interface If Reachable ==")
+    print(f"\n== Restore {ctrl_label} Interface If Reachable ==")
     ok, out = ssh_jump_check(get(cfg, "controller", "ssh_jump"), controller(cfg), "true", timeout=5)
     if not ok:
-        print("RockPI is not reachable via VisionFive; skipping RockPI restore")
+        print(f"{ctrl_label} is not reachable via {sup_label}; skipping {ctrl_label} restore")
         return cmd_network_check(cfg, _args)
 
     ok, out = remote_restore_network_via_jump(
@@ -2331,7 +2343,7 @@ def cmd_network_restore(cfg: configparser.ConfigParser, _args: argparse.Namespac
     )
     print(out)
     if not ok:
-        raise StandError("failed to restore RockPI interface")
+        raise StandError(f"failed to restore {ctrl_label} interface")
 
     ok, out = remote_restore_route_via_jump(
         get(cfg, "controller", "ssh_jump"),
@@ -2342,13 +2354,13 @@ def cmd_network_restore(cfg: configparser.ConfigParser, _args: argparse.Namespac
     )
     print(out)
     if not ok:
-        raise StandError("failed to restore RockPI reverse route")
+        raise StandError(f"failed to restore {ctrl_label} reverse route")
 
     ok, out = install_controller_ssh_key(cfg)
     if ok:
-        print("Installed PC SSH public key on RockPI")
+        print(f"Installed PC SSH public key on {ctrl_label}")
     else:
-        print(f"RockPI SSH key install skipped/failed: {out}")
+        print(f"{ctrl_label} SSH key install skipped/failed: {out}")
 
     return cmd_network_check(cfg, _args)
 
@@ -2360,13 +2372,15 @@ def cmd_status(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int
     ctrl_addr = get(cfg, "controller", "addr")
     pc_controller_gateway = get(cfg, "pc", "controller_gateway")
     pc_iface = get(cfg, "pc", "ethernet_iface")
+    sup_label = supervisor_label(cfg)
+    ctrl_label = controller_label(cfg)
 
     print("== Network ==")
     code, out = capture(["ip", "route", "get", addr_host(ctrl_addr)], timeout=5)
     checks.append(
         print_status(
             code == 0 and pc_controller_gateway in out and pc_iface in out,
-            "PC route to RockPI",
+            "PC route to controller",
             first_line(out),
         )
     )
@@ -2374,22 +2388,23 @@ def cmd_status(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int
         ["ping", "-c", "1", "-W", "2", addr_host(get(cfg, "supervisor", "pc_addr"))],
         timeout=5,
     )
-    checks.append(print_status(code == 0, "PC -> VisionFive ping", first_line(out)))
+    checks.append(print_status(code == 0, f"PC -> {sup_label} ping", first_line(out)))
     code, out = capture(["ping", "-c", "1", "-W", "2", addr_host(ctrl_addr)], timeout=5)
-    checks.append(print_status(code == 0, "PC -> RockPI ping", first_line(out)))
+    checks.append(print_status(code == 0, f"PC -> {ctrl_label} ping", first_line(out)))
     code, out = capture(["ssh", *SSH_AUTO_OPTS, sup, "true"], timeout=5)
-    checks.append(print_status(code == 0, "PC -> VisionFive ssh", out))
+    checks.append(print_status(code == 0, f"PC -> {sup_label} ssh", out))
     code, out = capture(["ssh", *SSH_AUTO_OPTS, ctrl, "true"], timeout=5)
-    checks.append(print_status(code == 0, "PC -> RockPI ssh", out))
-    ok, out = ssh_check(sup, "sysctl -n net.ipv4.ip_forward", timeout=5)
-    checks.append(print_status(ok and out.strip() == "1", "VisionFive forwarding", out))
+    checks.append(print_status(code == 0, f"PC -> {ctrl_label} ssh", out))
+    if opt(cfg, "supervisor", "enable_ip_forward", "").lower() in {"1", "yes", "true", "on"}:
+        ok, out = ssh_check(sup, "sysctl -n net.ipv4.ip_forward", timeout=5)
+        checks.append(print_status(ok and out.strip() == "1", f"{sup_label} forwarding", out))
 
     print("\n== Time ==")
     ok, skew, out = remote_time_skew(sup)
     checks.append(
         print_status(
             ok and skew is not None and abs(skew) <= 5,
-            "VisionFive clock",
+            f"{sup_label} clock",
             f"{skew:+d}s" if skew is not None else out,
         )
     )
@@ -2397,7 +2412,7 @@ def cmd_status(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int
     checks.append(
         print_status(
             ok and skew is not None and abs(skew) <= 5,
-            "RockPI clock",
+            f"{ctrl_label} clock",
             f"{skew:+d}s" if skew is not None else out,
         )
     )
@@ -2436,12 +2451,12 @@ def cmd_status(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int
     print_status(http_check(f"http://{grafana_addr}/api/health"), "trace Grafana", f"http://{grafana_addr}", optional=True)
     print_status(
         http_check(f"http://{addr_host(get(cfg, 'supervisor', 'pc_addr'))}:9201/metrics"),
-        "VisionFive trace exporter",
+        f"{sup_label} trace exporter",
         optional=True,
     )
     print_status(
         http_check(f"http://{addr_host(ctrl_addr)}:9201/metrics"),
-        "RockPI trace exporter",
+        f"{ctrl_label} trace exporter",
         optional=True,
     )
 
@@ -2590,8 +2605,8 @@ def build_parser() -> argparse.ArgumentParser:
         cmd.set_defaults(func=func)
 
     for name, func, help_text in (
-        ("sync-stand", cmd_sync_stand, "sync beremiz-stand workspace to VisionFive"),
-        ("build-plc", cmd_build_plc, "build supervised PLC project on VisionFive"),
+        ("sync-stand", cmd_sync_stand, "sync beremiz-stand workspace to supervisor"),
+        ("build-plc", cmd_build_plc, "build supervised PLC project on supervisor"),
         (
             "install-runtime-wrapper",
             cmd_install_runtime_wrapper,
@@ -2603,7 +2618,7 @@ def build_parser() -> argparse.ArgumentParser:
         (
             "sync-plc-debug-build",
             cmd_sync_plc_debug_build,
-            "copy PLC debug build artifacts back from VisionFive",
+            "copy PLC debug build artifacts back from supervisor",
         ),
     ):
         cmd = sub.add_parser(name, help=help_text)
@@ -2665,8 +2680,8 @@ def build_parser() -> argparse.ArgumentParser:
     deploy_all.set_defaults(func=cmd_deploy_all)
 
     deploy = sub.add_parser("deploy-rt-supervisor", help="sync rt-supervisor sources to boards")
-    deploy.add_argument("--supervisor-only", action="store_true", help="only sync VisionFive")
-    deploy.add_argument("--controller-only", action="store_true", help="only sync RockPI")
+    deploy.add_argument("--supervisor-only", action="store_true", help="only sync/deploy to supervisor")
+    deploy.add_argument("--controller-only", action="store_true", help="only sync/deploy to controller")
     deploy.add_argument("--dry-run", action="store_true", help="create archive and print actions")
     deploy.set_defaults(func=cmd_deploy_rt_supervisor)
 
