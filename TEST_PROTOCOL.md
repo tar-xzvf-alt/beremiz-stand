@@ -1,29 +1,25 @@
 # Протокол Измерений Supervised Raw Ethernet
 
 Этот протокол проверяет supervised-схему Beremiz runtime + `rt-supervisor` +
-RockPI controller и оценивает overhead trace-сбора.
+Ethernet-контроллер и оценивает overhead trace-сбора.
 
 ## Что Измеряем
 
 Основная метрика берется с Arduino через `rt-tester`: latency одного GPIO
 цикла от импульса до ответа.
 
-Trace-метрики опциональны и разбивают путь на агрегированные стадии:
+Trace-метрики собираются только на стороне supervisor'а (плата с Beremiz):
 
-| Host | Stage |
+| Stage | Что измеряет |
 | --- | --- |
-| RockPI | `gpio_to_send` |
-| RockPI | `request_send` |
-| RockPI | `response_recv` |
-| RockPI | `response_to_gpio` |
-| VisionFive | `ethernet_recv` |
-| VisionFive | `shmem_input` |
-| VisionFive | `runtime_wait` |
-| VisionFive | `shmem_output` |
-| VisionFive | `ethernet_send` |
+| `ethernet_recv` | Приём запроса через raw socket |
+| `shmem_input` | Запись в `/dev/shm/shmem_input` + futex wake |
+| `runtime_wait` | Ожидание ответа от Beremiz runtime |
+| `shmem_output` | Чтение ответа из `/dev/shm/shmem_output` |
+| `ethernet_send` | Отправка ответа через raw socket |
 
-Не вычитайте timestamps между RockPI и VisionFive: clocks разные. Сравнивайте
-только durations внутри одного host.
+Host в trace-данных теперь берётся через `gethostname()`, а не зашит
+статически.
 
 ## Предусловия
 
@@ -93,13 +89,12 @@ scripts/stand.py test-trace --groups 2
 
 ```text
 trace_mode=prometheus
-Imported trace metrics: 18
-trace=rockpi/gpio_to_send: groups=2 ...
-trace=visionfive/runtime_wait: groups=2 ...
+Imported trace metrics: 10
+trace=ethernet_recv: groups=2 ...
+trace=runtime_wait: groups=2 ...
 ```
 
-Для 2 групп ожидается 18 imported trace records: 2 groups * (4 RockPI stages +
-5 VisionFive stages).
+Для 2 групп ожидается 10 imported trace records: 2 groups * 5 стадий.
 
 Остановить локальный Prometheus и tunnels:
 
@@ -136,8 +131,8 @@ Dashboard `RT Trace Stage Breakdown` содержит четыре панели:
 - `Average Trace Stage Duration`
 - `Maximum Trace Stage Duration`
 
-Выберите `session_id`, напечатанный smoke script. Для `SMOKE_GROUPS=2` после
-добавления `shmem_output` ожидается `Imported trace metrics: 18`.
+Выберите `session_id`, напечатанный smoke script. Для `SMOKE_GROUPS=2`
+ожидается `Imported trace metrics: 10`.
 
 Остановить Grafana:
 

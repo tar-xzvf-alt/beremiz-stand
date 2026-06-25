@@ -150,7 +150,7 @@ smoke с `TRACE_MODE=prometheus` и импортирует trace metrics в SQLi
 Ожидаемый признак успеха для `--groups 2`:
 
 ```text
-Imported trace metrics: 18
+Imported trace metrics: 10
 ```
 
 ## 7. Открыть Grafana
