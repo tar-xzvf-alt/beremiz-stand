@@ -846,86 +846,295 @@ def cmd_trace_summary(cfg: configparser.ConfigParser, args: argparse.Namespace) 
     return run(cmd)
 
 
-def cmd_sync_stand(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
-    return run_or_dry(
-        [script("sync_to_visionfive.sh"), supervisor(cfg), beremiz_stand_dir(cfg)],
-        args.dry_run,
+def cmd_test_ab(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
+    repeats = args.ab_repeats
+    groups = args.ab_groups
+    out_dir = Path(
+        args.ab_output
+        or f"/tmp/rt-supervised-ab-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     )
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"A/B output: {out_dir}")
+    print(f"groups per run: {groups}")
+    print(f"repeats per mode: {repeats}")
+
+    summary: list[str] = []
+    for r in range(1, repeats + 1):
+        for mode in ("off", "prometheus"):
+            log_file = out_dir / f"{r}-{mode}.log"
+            print()
+            print(f"== A/B run repeat={r} mode={mode} ==")
+
+            ab_args = argparse.Namespace(
+                groups=groups,
+                interval_us=args.interval_us,
+                measurements_per_group=args.measurements_per_group,
+                arduino_port=args.arduino_port,
+                receiver_timeout_sec=args.receiver_timeout_sec,
+                no_trace_start=False,
+            )
+            params, tmp_path = params_for_run(cfg, ab_args)
+            try:
+                with open(log_file, "w", encoding="utf-8") as lf:
+                    old_stdout = sys.stdout
+                    sys.stdout = lf
+                    try:
+                        _run_smoke(cfg, ab_args, mode, params)
+                    except Exception as exc:
+                        print(str(exc), file=sys.stderr)
+                        with open(log_file, encoding="utf-8") as rf:
+                            print(rf.read())
+                        raise
+                    finally:
+                        sys.stdout = old_stdout
+                with open(log_file, encoding="utf-8") as rf:
+                    print(rf.read().strip())
+            finally:
+                cleanup_temp(tmp_path)
+
+            lines: list[str] = []
+            try:
+                with open(log_file, encoding="utf-8") as rf:
+                    for line in rf:
+                        line = line.strip()
+                        if line.startswith("trace_mode="):
+                            tm = line
+                        elif line.startswith("session="):
+                            ses = line
+                        elif line.startswith("groups="):
+                            gr = line
+                        elif line.startswith("latencies="):
+                            lat = line
+                        elif line.startswith("latency_min_avg_max_us="):
+                            lavg = line
+                        elif line.startswith("Imported trace metrics:"):
+                            imp = line
+                        else:
+                            continue
+                        lines.append(line)
+                parts = [l for l in lines if l]
+                summary.append(f"{r}-{mode}: {'; '.join(parts)}")
+            except Exception:
+                summary.append(f"{r}-{mode}: log error")
+
+    print()
+    print("== A/B summary ==")
+    for line in summary:
+        print(line)
+
+    return 0
+    db_path = args.db or opt(cfg, "measurement", "trace_db", "/tmp/rt-tester-supervised-smoke.db")
+    cmd = [
+        sys.executable,
+        str(
+            Path(get(cfg, "pc", "rt_tester_dir"))
+            / "src"
+            / "pc-receiver"
+            / "trace_summary.py"
+        ),
+        db_path,
+    ]
+    if args.session_id:
+        cmd += ["--session-id", str(args.session_id)]
+    if not args.all:
+        cmd += ["--host", "visionfive"]
+    return run(cmd)
+
+
+def cmd_sync_stand(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
+    if args.dry_run:
+        print(
+            "+ sync beremiz-stand workspace to "
+            f"{supervisor(cfg)}:{beremiz_stand_dir(cfg)}"
+        )
+        return 0
+    sup = supervisor(cfg)
+    remote_dir = beremiz_stand_dir(cfg)
+    archive = tempfile.NamedTemporaryFile(
+        suffix=".tgz", prefix="beremiz-stand-transfer.", delete=False
+    )
+    archive.close()
+    try:
+        run(
+            [
+                "tar",
+                "--exclude=./.git",
+                "--exclude=./.deps",
+                "--exclude=./beremiz-project/*/build",
+                "--exclude=./beremiz-project/*/psk",
+                "--exclude=./beremiz-project/*/psk/*",
+                "--exclude=__pycache__",
+                "-czf",
+                archive.name,
+                ".",
+            ],
+            check=False,
+        )
+        run(
+            [
+                "scp",
+                "-q",
+                archive.name,
+                f"{sup}:/tmp/beremiz-stand-transfer.tgz",
+            ]
+        )
+        _, out = ssh_check(
+            sup,
+            f"rm -rf {shlex.quote(remote_dir)} && "
+            f"mkdir -p {shlex.quote(remote_dir)} && "
+            f"tar -xzf /tmp/beremiz-stand-transfer.tgz -C {shlex.quote(remote_dir)}",
+            timeout=120,
+        )
+        print(f"Synced workspace to {sup}:{remote_dir}")
+        if out:
+            print(out)
+    finally:
+        Path(archive.name).unlink(missing_ok=True)
+    return 0
 
 
 def cmd_build_plc(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
-    return run_or_dry(
-        [
-            script("build_supervised_raw_on_visionfive.sh"),
-            supervisor(cfg),
-            beremiz_stand_dir(cfg),
-            plc_project(cfg),
-        ],
-        args.dry_run,
+    sup = supervisor(cfg)
+    remote = beremiz_stand_dir(cfg)
+    project = plc_project(cfg)
+    cmd = (
+        f"cd {shlex.quote(remote)} && "
+        f"rm -rf {shlex.quote(project + '/build')} && "
+        f"/usr/bin/python3 /usr/share/beremiz/Beremiz_cli.py "
+        f"--project-home {shlex.quote(project)} build"
     )
+    return run_or_dry(["ssh", *SSH_AUTO_OPTS, sup, cmd], args.dry_run)
 
 
 def cmd_install_runtime_wrapper(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
-    return run_or_dry(
-        [
-            script("install_supervised_runtime_wrapper_on_visionfive.sh"),
-            supervisor(cfg),
-            runtime_dir(cfg),
-            runtime_bind_ip(cfg),
-            runtime_port(cfg),
-            beremiz_stand_dir(cfg),
-        ],
-        args.dry_run,
+    sup = supervisor(cfg)
+    rtdir = runtime_dir(cfg)
+    ip = runtime_bind_ip(cfg)
+    port = runtime_port(cfg)
+    remote = beremiz_stand_dir(cfg)
+    wrapper = f"{rtdir}/start_runtime.sh"
+    compat = f"{remote}/scripts/beremiz_runtime_compat_15.py"
+    script = (
+        "set -eu; "
+        f"mkdir -p {shlex.quote(rtdir)}; "
+        f"cat > {shlex.quote(wrapper)} <<'WRAPPER_EOF'\n"
+        f"#!/bin/sh\n"
+        f"set -eu\n"
+        f"export PATH=/usr/sbin:/usr/bin:/sbin:/bin\n"
+        f"export HOME=/root\n"
+        f"cd {shlex.quote(rtdir)}\n"
+        f"exec /usr/bin/python3 /usr/share/beremiz/Beremiz_service.py "
+        f"-i {shlex.quote(ip)} -p {shlex.quote(port)} -a 1 -x 0 -t 0 -w off "
+        f"-e {shlex.quote(compat)} .\n"
+        f"WRAPPER_EOF\n"
+        f"chmod +x {shlex.quote(wrapper)}; "
+        f"ls -l {shlex.quote(wrapper)}"
     )
+    if args.dry_run:
+        print(f"+ ssh {sup} {script}")
+        return 0
+    _, out = ssh_check(sup, script, timeout=10)
+    print(f"Installed supervised runtime wrapper at {sup}:{wrapper}")
+    if out:
+        print(out)
+    return 0
 
 
 def cmd_start_runtime(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
-    return run_or_dry(
-        [
-            script("start_runtime_on_visionfive.sh"),
-            supervisor(cfg),
-            runtime_dir(cfg),
-            runtime_bind_ip(cfg),
-            runtime_port(cfg),
-            beremiz_stand_dir(cfg),
-        ],
-        args.dry_run,
+    sup = supervisor(cfg)
+    rtdir = runtime_dir(cfg)
+    ip = runtime_bind_ip(cfg)
+    port = runtime_port(cfg)
+    remote = beremiz_stand_dir(cfg)
+    pidfile = f"{rtdir}/beremiz_service.pid"
+    logfile = f"{rtdir}/beremiz_service.log"
+    compat = f"{remote}/scripts/beremiz_runtime_compat_15.py"
+    script = (
+        "set -eu; "
+        f"mkdir -p {shlex.quote(rtdir)}; "
+        f"if [ -f {shlex.quote(pidfile)} ] && "
+        f"kill -0 \"$(cat {shlex.quote(pidfile)})\" 2>/dev/null; then "
+        f"echo 'Beremiz runtime already running on {ip}:{port}'; exit 0; fi; "
+        f"rm -f {shlex.quote(pidfile)}; "
+        f"cd {shlex.quote(rtdir)}; "
+        f"EXT_ARGS=; "
+        f"if [ -f {shlex.quote(compat)} ]; then "
+        f"EXT_ARGS=\"-e {shlex.quote(compat)}\"; fi; "
+        f"nohup /usr/bin/python3 /usr/share/beremiz/Beremiz_service.py "
+        f"-i {shlex.quote(ip)} -p {shlex.quote(port)} -x 0 -t 0 -w off "
+        f"$EXT_ARGS . >{shlex.quote(logfile)} 2>&1 & "
+        f"echo $! > {shlex.quote(pidfile)}; "
+        f"sleep 2; "
+        f"if ! kill -0 \"$(cat {shlex.quote(pidfile)})\" 2>/dev/null; then "
+        f"echo 'Beremiz runtime failed to start; log follows:' >&2; "
+        f"tail -n 80 {shlex.quote(logfile)} >&2; exit 1; fi; "
+        f"grep -q 'Current working directory' {shlex.quote(logfile)} || {{ "
+        f"echo 'Beremiz runtime did not report readiness; log follows:' >&2; "
+        f"tail -n 80 {shlex.quote(logfile)} >&2; exit 1; }}; "
+        f"echo 'Beremiz runtime started on {ip}:{port}'"
     )
+    return run_or_dry(["ssh", *SSH_AUTO_OPTS, sup, script], args.dry_run)
 
 
 def cmd_stop_runtime(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
-    return run_or_dry(
-        [
-            script("stop_runtime_on_visionfive.sh"),
-            supervisor(cfg),
-            runtime_dir(cfg),
-        ],
-        args.dry_run,
+    sup = supervisor(cfg)
+    rtdir = runtime_dir(cfg)
+    pidfile = f"{rtdir}/beremiz_service.pid"
+    script = (
+        "set -eu; "
+        f"if [ ! -f {shlex.quote(pidfile)} ]; then "
+        f"echo 'Beremiz runtime is not running'; exit 0; fi; "
+        f"PID=\"$(cat {shlex.quote(pidfile)})\"; "
+        f"if ! kill -0 \"$PID\" 2>/dev/null; then "
+        f"rm -f {shlex.quote(pidfile)}; "
+        f"echo 'Beremiz runtime is not running'; exit 0; fi; "
+        f"kill \"$PID\"; "
+        f"for _ in 1 2 3 4 5; do "
+        f"if ! kill -0 \"$PID\" 2>/dev/null; then "
+        f"rm -f {shlex.quote(pidfile)}; "
+        f"echo 'Beremiz runtime stopped'; exit 0; fi; "
+        f"sleep 1; done; "
+        f"kill -KILL \"$PID\" 2>/dev/null || true; "
+        f"rm -f {shlex.quote(pidfile)}; "
+        f"echo 'Beremiz runtime killed'"
     )
+    return run_or_dry(["ssh", *SSH_AUTO_OPTS, sup, script], args.dry_run)
 
 
 def cmd_deploy_plc(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
-    return run_or_dry(
-        [
-            script("deploy_run_supervised_raw_on_visionfive_runtime.sh"),
-            supervisor(cfg),
-            beremiz_stand_dir(cfg),
-            get(cfg, "supervisor", "erpc_url"),
-            plc_project(cfg),
-        ],
-        args.dry_run,
+    sup = supervisor(cfg)
+    remote = beremiz_stand_dir(cfg)
+    uri = get(cfg, "supervisor", "erpc_url")
+    project = plc_project(cfg)
+    cmd = (
+        f"cd {shlex.quote(remote)} && "
+        f"/usr/bin/python3 /usr/share/beremiz/Beremiz_cli.py "
+        f"--project-home {shlex.quote(project)} "
+        f"--uri {shlex.quote(uri)} transfer run"
     )
+    return run_or_dry(["ssh", *SSH_AUTO_OPTS, sup, cmd], args.dry_run)
 
 
 def cmd_sync_plc_debug_build(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
-    return run_or_dry(
-        [
-            script("sync_supervised_debug_build_from_visionfive.sh"),
-            supervisor(cfg),
-            beremiz_stand_dir(cfg),
-        ],
-        args.dry_run,
-    )
+    sup = supervisor(cfg)
+    remote = beremiz_stand_dir(cfg)
+    project = plc_project(cfg)
+    local = Path(get(cfg, "supervisor", "beremiz_stand_dir")) / project  # Not actually local — we need repo root
+    repo_root = ROOT
+    local_project = repo_root / project
+    if args.dry_run:
+        print(
+            f"+ scp -r {sup}:{remote}/{project}/build {local_project}/"
+        )
+        return 0
+    if not local_project.is_dir():
+        raise StandError(f"Local project not found: {local_project}")
+    run(["rm", "-rf", str(local_project / "build")])
+    run(["scp", "-r", f"{sup}:{remote}/{project}/build", str(local_project)])
+    print(f"Synced GUI debug build artifacts to {local_project}/build")
+    print(f"Open GUI with: beremiz {local_project}")
+    return 0
 
 
 def deploy_all_dry_run(args: argparse.Namespace) -> int:
@@ -2392,6 +2601,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="do not start local trace Prometheus before running smoke",
     )
     trace.set_defaults(func=cmd_test_trace)
+
+    ab_test = sub.add_parser("test-ab", help="run A/B overhead comparison (off, prometheus)")
+    add_measurement_options(ab_test)
+    ab_test.add_argument("--ab-repeats", type=int, default=1, help="repeats per mode")
+    ab_test.add_argument("--ab-groups", type=int, default=2, help="groups per repeat")
+    ab_test.add_argument("--ab-output", help="output directory (default: /tmp/rt-supervised-ab-*)")
+    ab_test.set_defaults(func=cmd_test_ab)
 
     logs = sub.add_parser("collect-logs", help="collect board logs into a local directory")
     logs.add_argument("--output", help="output directory (default: /tmp/rt-stand-logs-*)")
