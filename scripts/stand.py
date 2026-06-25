@@ -1589,6 +1589,8 @@ def ssh_jump_script(
 ) -> tuple[bool, str]:
     try:
         if jump == host:
+            if shell_args:
+                return _ssh_script_args(host, script, shell_args, timeout=timeout)
             return ssh_script(host, script, timeout=timeout)
         inner_opts = " ".join(shlex.quote(part) for part in SSH_AUTO_OPTS)
         args_suffix = ""
