@@ -1378,6 +1378,8 @@ def scp_to(host: str, local: Path, remote: str) -> int:
 
 
 def scp_to_via_jump(jump: str, host: str, local: Path, remote: str) -> int:
+    if jump == host:
+        return scp_to(host, local, remote)
     jump_archive = f"/tmp/{Path(remote).name}"
     scp_to(jump, local, jump_archive)
     inner_opts = " ".join(shlex.quote(part) for part in SSH_AUTO_OPTS)
@@ -1395,6 +1397,8 @@ def ssh_run(host: str, command: str) -> int:
 
 
 def ssh_jump_run(jump: str, host: str, command: str) -> int:
+    if jump == host:
+        return ssh_run(host, command)
     inner_opts = " ".join(shlex.quote(part) for part in SSH_AUTO_OPTS)
     remote_cmd = f"ssh {inner_opts} {shlex.quote(host)} {shlex.quote(command)}"
     return run(["ssh", *SSH_AUTO_OPTS, jump, remote_cmd])
@@ -1403,7 +1407,8 @@ def ssh_jump_run(jump: str, host: str, command: str) -> int:
 def deploy_archive(host: str, remote_dir: str, archive: Path, jump: str | None = None) -> None:
     assert_safe_remote_dir(remote_dir)
     remote_archive = "/tmp/rt-supervisor-transfer.tgz"
-    if jump:
+    use_jump = jump and jump != host
+    if use_jump:
         scp_to_via_jump(jump, host, archive, remote_archive)
     else:
         scp_to(host, archive, remote_archive)
@@ -1414,7 +1419,7 @@ def deploy_archive(host: str, remote_dir: str, archive: Path, jump: str | None =
         f"tar -xzf {remote_archive} -C {shlex.quote(remote_dir)}; "
         f"rm -f {remote_archive}"
     )
-    if jump:
+    if use_jump:
         ssh_jump_run(jump, host, remote_command)
     else:
         ssh_run(host, remote_command)
@@ -1438,27 +1443,31 @@ def cmd_deploy_rt_supervisor(cfg: configparser.ConfigParser, args: argparse.Name
     archive = create_rt_supervisor_archive(local_rt_supervisor(cfg))
     try:
         if args.dry_run:
+            sup_label = supervisor_label(cfg)
+            ctrl_label = controller_label(cfg)
             print(f"Created archive: {archive}")
             if deploy_supervisor:
                 print(
-                    "Would deploy to VisionFive: "
+                    f"Would deploy to {sup_label}: "
                     f"{supervisor(cfg)}:{get(cfg, 'supervisor', 'rt_supervisor_dir')}"
                 )
             if deploy_controller:
                 print(
-                    "Would deploy to RockPI via VisionFive: "
+                    f"Would deploy to {ctrl_label}: "
                     f"{controller(cfg)}:{get(cfg, 'controller', 'rt_supervisor_dir')}"
                 )
             return 0
+        sup_label = supervisor_label(cfg)
+        ctrl_label = controller_label(cfg)
         if deploy_supervisor:
-            print("== Deploy rt-supervisor to VisionFive ==")
+            print(f"== Deploy rt-supervisor to {sup_label} ==")
             deploy_archive(
                 supervisor(cfg),
                 get(cfg, "supervisor", "rt_supervisor_dir"),
                 archive,
             )
         if deploy_controller:
-            print("== Deploy rt-supervisor to RockPI ==")
+            print(f"== Deploy rt-supervisor to {ctrl_label} ==")
             deploy_archive(
                 controller(cfg),
                 get(cfg, "controller", "rt_supervisor_dir"),
@@ -1484,21 +1493,23 @@ def cmd_build_rt_supervisor(cfg: configparser.ConfigParser, args: argparse.Names
         "controller-emu",
         args.clean_first,
     )
+    sup_label = supervisor_label(cfg)
+    ctrl_label = controller_label(cfg)
     if args.dry_run:
         if build_supervisor:
-            print(f"Would run on VisionFive {supervisor(cfg)}: {supervisor_command}")
+            print(f"Would run on {sup_label} {supervisor(cfg)}: {supervisor_command}")
         if build_controller:
             print(
-                "Would run on RockPI "
+                f"Would run on {ctrl_label} "
                 f"{controller(cfg)} via {get(cfg, 'controller', 'ssh_jump')}: "
                 f"{controller_command}"
             )
         return 0
     if build_supervisor:
-        print("== Build alt-rt-supervisor on VisionFive ==")
+        print(f"== Build alt-rt-supervisor on {sup_label} ==")
         ssh_run(supervisor(cfg), supervisor_command)
     if build_controller:
-        print("== Build controller-emu on RockPI ==")
+        print(f"== Build controller-emu on {ctrl_label} ==")
         ssh_jump_run(
             get(cfg, "controller", "ssh_jump"),
             controller(cfg),
