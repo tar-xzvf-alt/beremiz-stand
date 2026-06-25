@@ -310,31 +310,347 @@ def cmd_check(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
     return 0
 
 
+_TRACE_PROM_RUNTIME = "/tmp/rt-trace-prometheus-local"
+
+
+def _local_pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except (OSError, ProcessLookupError):
+        return False
+    return True
+
+
+def _local_stop_pid_file(label: str, pid_file: Path) -> None:
+    if not pid_file.is_file():
+        print(f"{label}: not running")
+        return
+    try:
+        pid = int(pid_file.read_text(encoding="utf-8").strip())
+    except (ValueError, OSError):
+        print(f"{label}: stale pid file")
+        pid_file.unlink(missing_ok=True)
+        return
+    if not _local_pid_alive(pid):
+        print(f"{label}: stale pid file")
+        pid_file.unlink(missing_ok=True)
+        return
+    print(f"{label}: stopping pid={pid}")
+    try:
+        os.kill(pid, 15)
+    except OSError:
+        pass
+    for _ in range(5):
+        if not _local_pid_alive(pid):
+            print(f"{label}: stopped")
+            pid_file.unlink(missing_ok=True)
+            return
+        time.sleep(1)
+    print(f"{label}: killing pid={pid}")
+    try:
+        os.kill(pid, 9)
+    except OSError:
+        pass
+    pid_file.unlink(missing_ok=True)
+
+
+def _local_start_tunnel(
+    label: str,
+    pid_file: Path,
+    forward: str,
+    ssh_host: str,
+    log_file: Path,
+) -> None:
+    if pid_file.is_file():
+        try:
+            old = int(pid_file.read_text(encoding="utf-8").strip())
+        except (ValueError, OSError):
+            old = 0
+        if _local_pid_alive(old):
+            print(f"{label} tunnel already running pid={old}")
+            return
+        pid_file.unlink(missing_ok=True)
+
+    with open(log_file, "ab") as lf:
+        proc = subprocess.Popen(
+            [
+                "ssh",
+                *SSH_AUTO_OPTS,
+                "-N",
+                "-o",
+                "ExitOnForwardFailure=yes",
+                "-L",
+                forward,
+                ssh_host,
+            ],
+            stdout=lf,
+            stderr=subprocess.STDOUT,
+        )
+    pid_file.write_text(str(proc.pid), encoding="utf-8")
+    time.sleep(1)
+    if not _local_pid_alive(proc.pid):
+        raise StandError(f"{label} tunnel failed; see {log_file}")
+    print(f"{label} tunnel pid={proc.pid} forward={forward}")
+
+
 def cmd_trace_start(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
-    env = {
-        "VISIONFIVE": supervisor(cfg),
-        "RT_TESTER_DIR": get(cfg, "pc", "rt_tester_dir"),
-        "TRACE_PROMETHEUS_ADDR": get(cfg, "pc", "trace_prometheus_addr"),
-    }
-    return run([script("start_trace_prometheus_local.sh")], env=env)
+    sup = supervisor(cfg)
+    rt_tester = get(cfg, "pc", "rt_tester_dir")
+    prom_addr = get(cfg, "pc", "trace_prometheus_addr")
+    runtime = Path(_TRACE_PROM_RUNTIME)
+    data_dir = runtime / "data"
+    prom_config = Path(rt_tester) / "prometheus" / "trace-prometheus-local-tunnel.yml"
+    prom_bin = Path("/bin/prometheus")
+
+    if not prom_bin.is_file():
+        raise StandError(f"Prometheus binary not found: {prom_bin}")
+    if not prom_config.is_file():
+        raise StandError(f"Prometheus config not found: {prom_config}")
+
+    runtime.mkdir(parents=True, exist_ok=True)
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    vf_forward = "19201:127.0.0.1:9201"
+    rp_forward = "19202:10.43.0.2:9201"
+
+    _local_start_tunnel(
+        "visionfive",
+        runtime / "visionfive-tunnel.pid",
+        vf_forward,
+        sup,
+        runtime / "visionfive.log",
+    )
+    _local_start_tunnel(
+        "rockpi",
+        runtime / "rockpi-tunnel.pid",
+        rp_forward,
+        sup,
+        runtime / "rockpi.log",
+    )
+
+    prom_pid_file = runtime / "prometheus.pid"
+    if prom_pid_file.is_file():
+        try:
+            old = int(prom_pid_file.read_text(encoding="utf-8").strip())
+        except (ValueError, OSError):
+            old = 0
+        if _local_pid_alive(old):
+            print(f"trace Prometheus already running pid={old}")
+        else:
+            prom_pid_file.unlink(missing_ok=True)
+
+    if not prom_pid_file.is_file():
+        with open(runtime / "prometheus.log", "ab") as plf:
+            proc = subprocess.Popen(
+                [
+                    str(prom_bin),
+                    f"--config.file={prom_config}",
+                    f"--storage.tsdb.path={data_dir}",
+                    f"--web.listen-address={prom_addr}",
+                    "--storage.tsdb.retention.time=2h",
+                ],
+                stdout=plf,
+                stderr=subprocess.STDOUT,
+            )
+        prom_pid_file.write_text(str(proc.pid), encoding="utf-8")
+        time.sleep(2)
+        if not _local_pid_alive(proc.pid):
+            raise StandError(
+                f"trace Prometheus failed; see {runtime / 'prometheus.log'}"
+            )
+        print(f"trace Prometheus pid={proc.pid} addr={prom_addr}")
+
+    if not http_check(f"http://{prom_addr}/-/ready", timeout=10):
+        raise StandError(f"trace Prometheus not ready at {prom_addr}")
+
+    for label, port in ("VisionFive", "19201"), ("RockPI", "19202"):
+        if not http_check(f"http://127.0.0.1:{port}/metrics", timeout=5):
+            print(
+                f"trace exporter is not ready at "
+                f"http://127.0.0.1:{port}/metrics; normal before smoke starts"
+            )
+
+    print(f"TRACE_PROMETHEUS_URL=http://{prom_addr}")
+    return 0
 
 
 def cmd_trace_stop(_cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
-    return run([script("stop_trace_prometheus_local.sh")])
+    runtime = Path(_TRACE_PROM_RUNTIME)
+    _local_stop_pid_file("trace Prometheus", runtime / "prometheus.pid")
+    _local_stop_pid_file("RockPI tunnel", runtime / "rockpi-tunnel.pid")
+    _local_stop_pid_file("VisionFive tunnel", runtime / "visionfive-tunnel.pid")
+    return 0
+
+
+_TRACE_GRAFANA_RUNTIME = "/tmp/rt-trace-grafana-local"
+
+
+def _grafana_pids(data_dir: str) -> list[int]:
+    result = subprocess.run(
+        ["ps", "-eo", "pid,args"],
+        capture_output=True,
+        text=True,
+    )
+    pids: list[int] = []
+    for line in result.stdout.splitlines():
+        if "grafana" not in line:
+            continue
+        if data_dir not in line:
+            continue
+        parts = line.strip().split(None, 1)
+        if parts:
+            try:
+                pids.append(int(parts[0]))
+            except ValueError:
+                pass
+    return pids
 
 
 def cmd_grafana_start(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
-    host, port = get(cfg, "pc", "trace_grafana_addr").rsplit(":", 1)
-    env = {
-        "RT_TESTER_DIR": get(cfg, "pc", "rt_tester_dir"),
-        "TRACE_GRAFANA_ADDR": host,
-        "TRACE_GRAFANA_PORT": port,
-    }
-    return run([script("start_trace_grafana_local.sh")], env=env)
+    rt_tester = get(cfg, "pc", "rt_tester_dir")
+    addr_host, addr_port = get(cfg, "pc", "trace_grafana_addr").rsplit(":", 1)
+    runtime = Path(_TRACE_GRAFANA_RUNTIME)
+    data_dir = runtime / "data"
+    log_dir = runtime / "logs"
+    plugin_dir = runtime / "plugins"
+    provisioning = Path(rt_tester) / "grafana" / "provisioning"
+    pid_file = runtime / "grafana.pid"
+    grafana_bin = Path("/bin/grafana-server")
+    grafana_home = Path("/usr/share/grafana")
+
+    if not grafana_bin.is_file():
+        raise StandError(f"Grafana binary not found: {grafana_bin}")
+    if not grafana_home.is_dir():
+        raise StandError(f"Grafana home not found: {grafana_home}")
+    if not provisioning.is_dir():
+        raise StandError(f"Grafana provisioning not found: {provisioning}")
+
+    runtime.mkdir(parents=True, exist_ok=True)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+
+    health_url = f"http://{addr_host}:{addr_port}/api/health"
+
+    if pid_file.is_file():
+        try:
+            old = int(pid_file.read_text(encoding="utf-8").strip())
+        except (ValueError, OSError):
+            old = 0
+        if _local_pid_alive(old) and http_check(health_url, timeout=2):
+            print(f"trace Grafana already running pid={old}")
+            print(f"http://{addr_host}:{addr_port}/d/rt-trace-stages")
+            return 0
+        pid_file.unlink(missing_ok=True)
+
+    stale = _grafana_pids(str(data_dir))
+    if stale:
+        if http_check(health_url, timeout=2):
+            pid_file.write_text(str(stale[0]), encoding="utf-8")
+            print(f"trace Grafana already running pid={stale[0]}")
+            print(f"http://{addr_host}:{addr_port}/d/rt-trace-stages")
+            return 0
+        print(f"trace Grafana stale process found; stopping {stale}")
+        for p in stale:
+            try:
+                os.kill(p, 15)
+            except OSError:
+                pass
+
+    with open(log_dir / "grafana.log", "ab") as glf:
+        proc = subprocess.Popen(
+            [
+                str(grafana_bin),
+                f"--homepath={grafana_home}",
+                f"cfg:paths.data={data_dir}",
+                f"cfg:paths.logs={log_dir}",
+                f"cfg:paths.plugins={plugin_dir}",
+                f"cfg:paths.provisioning={provisioning}",
+                f"cfg:server.http_addr={addr_host}",
+                f"cfg:server.http_port={addr_port}",
+                "cfg:security.admin_user=admin",
+                "cfg:security.admin_password=admin",
+                "cfg:auth.anonymous.enabled=true",
+                "cfg:auth.anonymous.org_role=Viewer",
+            ],
+            stdout=glf,
+            stderr=subprocess.STDOUT,
+        )
+    pid_file.write_text(str(proc.pid), encoding="utf-8")
+
+    for _ in range(10):
+        if http_check(health_url, timeout=2):
+            break
+        time.sleep(1)
+
+    live = _grafana_pids(str(data_dir))
+    actual_pid = live[0] if live else proc.pid
+    if live:
+        pid_file.write_text(str(actual_pid), encoding="utf-8")
+    if not _local_pid_alive(actual_pid):
+        raise StandError(
+            f"trace Grafana failed; see {log_dir / 'grafana.log'}"
+        )
+
+    if not http_check(health_url, timeout=5):
+        raise StandError(
+            f"trace Grafana not ready at http://{addr_host}:{addr_port}"
+        )
+
+    print(
+        f"trace Grafana pid={actual_pid} "
+        f"addr={addr_host}:{addr_port}"
+    )
+    print(f"http://{addr_host}:{addr_port}/d/rt-trace-stages")
+    return 0
 
 
 def cmd_grafana_stop(_cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
-    return run([script("stop_trace_grafana_local.sh")])
+    runtime = Path(_TRACE_GRAFANA_RUNTIME)
+    data_dir = runtime / "data"
+    pid_file = runtime / "grafana.pid"
+
+    live_pids: list[int] = []
+    if pid_file.is_file():
+        try:
+            pid = int(pid_file.read_text(encoding="utf-8").strip())
+        except (ValueError, OSError):
+            pid = 0
+        if pid and _local_pid_alive(pid):
+            live_pids.append(pid)
+
+    if not live_pids:
+        live_pids = _grafana_pids(str(data_dir))
+
+    if not live_pids:
+        print("trace Grafana: not running")
+        pid_file.unlink(missing_ok=True)
+        return 0
+
+    pids_str = " ".join(str(p) for p in live_pids)
+    print(f"trace Grafana: stopping {pids_str}")
+    for pid in live_pids:
+        try:
+            os.kill(pid, 15)
+        except OSError:
+            pass
+    for _ in range(5):
+        alive = [p for p in live_pids if _local_pid_alive(p)]
+        if not alive:
+            print("trace Grafana: stopped")
+            pid_file.unlink(missing_ok=True)
+            return 0
+        time.sleep(1)
+    remaining = " ".join(str(p) for p in alive if _local_pid_alive(p))
+    if remaining:
+        print(f"trace Grafana: killing {remaining}")
+        for pid in live_pids:
+            try:
+                os.kill(pid, 9)
+            except OSError:
+                pass
+    pid_file.unlink(missing_ok=True)
+    return 0
 
 
 def _run_smoke(
