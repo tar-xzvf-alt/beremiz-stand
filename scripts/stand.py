@@ -2,9 +2,11 @@
 import argparse
 import configparser
 import os
+import random
 import re
 import shlex
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -193,6 +195,18 @@ def write_param(lines: list[str], key: str, value: str) -> list[str]:
     return out
 
 
+def param_value(path: Path, key: str) -> str:
+    for line in read_params(path):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        eq = stripped.split("=", 1)
+        if eq[0].strip() == key:
+            value = eq[1].split("#", 1)[0].strip()
+            return value
+    return ""
+
+
 def temp_params(cfg: configparser.ConfigParser, args: argparse.Namespace) -> object | None:
     src = Path(get(cfg, "measurement", "params"))
     interval_us = args.interval_us or opt(cfg, "measurement", "interval_us", "")
@@ -323,11 +337,166 @@ def cmd_grafana_stop(_cfg: configparser.ConfigParser, _args: argparse.Namespace)
     return run([script("stop_trace_grafana_local.sh")])
 
 
+def _run_smoke(
+    cfg: configparser.ConfigParser,
+    args: argparse.Namespace,
+    trace_mode: str,
+    params_path: Path,
+) -> int:
+    params_file = params_path
+    smoke_db = param_value(params_file, "db")
+    if not smoke_db:
+        raise StandError("Smoke params do not define db")
+    measurements_per_group = param_value(params_file, "measurements-per-group")
+    if not measurements_per_group:
+        raise StandError("Smoke params do not define measurements-per-group")
+
+    groups = args.groups or int(get(cfg, "measurement", "groups"))
+    if groups < 1:
+        raise StandError("SMOKE_GROUPS must be >= 1")
+
+    session_id = random.randint(100000, 999999)
+    receiver_dir = (
+        Path(get(cfg, "pc", "rt_tester_dir")) / "src" / "pc-receiver"
+    )
+    arduino_port = args.arduino_port or get(cfg, "pc", "arduino_port")
+    receiver_timeout = str(
+        args.receiver_timeout_sec
+        or opt(cfg, "measurement", "receiver_timeout_sec", "120")
+    )
+
+    if trace_mode == "prometheus":
+        prom_url = get(cfg, "pc", "trace_prometheus_url")
+        if not prom_url:
+            raise StandError("TRACE_MODE=prometheus requires TRACE_PROMETHEUS_URL")
+        ses = str(session_id)
+        exp = True
+    else:
+        ses = ""
+        exp = False
+
+    print("== Start supervised stack ==")
+    _start_stack(
+        cfg,
+        trace_session_id=ses,
+        trace_mpg=measurements_per_group,
+        trace_exporters=exp,
+    )
+    print()
+
+    print(f"trace_mode={trace_mode}")
+
+    print("== Check supervised stack ==")
+    cmd_check(cfg, argparse.Namespace())
+
+    print()
+    print("== Run receiver smoke ==")
+    db_path = Path(smoke_db)
+    for suffix in ("", "-shm", "-wal"):
+        p = Path(str(db_path) + suffix)
+        if p.exists():
+            p.unlink()
+
+    run(
+        [
+            sys.executable,
+            str(receiver_dir / "receiver.py"),
+            "--params",
+            str(params_file),
+            "--port",
+            arduino_port,
+            "--session-id",
+            str(session_id),
+            "--groups",
+            str(groups),
+            "--start",
+            "--exit-on-stop",
+        ],
+        env={**os.environ, "RT_TESTER_DIR": get(cfg, "pc", "rt_tester_dir")},
+    )
+
+    if trace_mode == "prometheus":
+        print()
+        print("== Import trace metrics ==")
+        settle = int(opt(cfg, "measurement", "trace_prometheus_settle_sec", "2"))
+        time.sleep(settle)
+        run(
+            [
+                sys.executable,
+                str(receiver_dir / "import_trace_metrics.py"),
+                smoke_db,
+                str(session_id),
+                "--prometheus-url",
+                get(cfg, "pc", "trace_prometheus_url"),
+            ]
+        )
+
+    print()
+    print("== Smoke database summary ==")
+    try:
+        with sqlite3.connect(smoke_db) as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT session_id, COUNT(*) FROM groups "
+                "GROUP BY session_id ORDER BY MAX(id) DESC LIMIT 1"
+            )
+            row = cur.fetchone()
+            if row is None:
+                raise StandError("No groups saved")
+            sid, group_count = row
+
+            cur.execute(
+                "SELECT COUNT(*), MIN(l.latency_us), AVG(l.latency_us), "
+                "MAX(l.latency_us) "
+                "FROM latencies l JOIN groups g ON g.id = l.group_id "
+                "WHERE g.session_id = ?",
+                (sid,),
+            )
+            latency_count, min_us, avg_us, max_us = cur.fetchone()
+
+            cur.execute(
+                "SELECT event_type, details FROM events "
+                "WHERE session_id = ? ORDER BY id",
+                (sid,),
+            )
+            events = cur.fetchall()
+
+            cur.execute(
+                "SELECT host, stage, COUNT(*), AVG(avg_us), MAX(max_us) "
+                "FROM trace_group_metrics "
+                "WHERE session_id = ? "
+                "GROUP BY host, stage ORDER BY host, stage",
+                (sid,),
+            )
+            trace_rows = cur.fetchall()
+
+        print(f"session={sid}")
+        print(f"groups={group_count}")
+        print(f"latencies={latency_count}")
+        print(f"latency_min_avg_max_us={min_us} / {avg_us:.2f} / {max_us}")
+        for event_type, details in events:
+            print(f"event={event_type}: {details}")
+        for host, stage, tgroups, tavg_us, tmax_us in trace_rows:
+            print(
+                f"trace={host}/{stage}: groups={tgroups} "
+                f"avg_us={tavg_us:.2f} max_us={tmax_us:.2f}"
+            )
+        if group_count != groups:
+            raise StandError(
+                f"Expected {groups} groups, saved {group_count}"
+            )
+    except StandError:
+        raise
+    except Exception as exc:
+        print(f"Summary failed: {exc}")
+
+    return 0
+
+
 def cmd_test_smoke(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
     params, tmp_path = params_for_run(cfg, args)
     try:
-        env = smoke_env(cfg, args, "off", params)
-        return run([script("run_supervised_smoke.sh"), supervisor(cfg), controller(cfg)], env=env)
+        return _run_smoke(cfg, args, "off", params)
     finally:
         cleanup_temp(tmp_path)
 
@@ -337,8 +506,7 @@ def cmd_test_trace(cfg: configparser.ConfigParser, args: argparse.Namespace) -> 
     try:
         if not args.no_trace_start:
             cmd_trace_start(cfg, args)
-        env = smoke_env(cfg, args, "prometheus", params)
-        return run([script("run_supervised_smoke.sh"), supervisor(cfg), controller(cfg)], env=env)
+        return _run_smoke(cfg, args, "prometheus", params)
     finally:
         cleanup_temp(tmp_path)
 
