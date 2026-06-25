@@ -240,17 +240,13 @@ def cleanup_temp(path: str | None) -> None:
 
 
 def cmd_start(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
-    return run(
-        [
-            script("start_supervised_stack.sh"),
-            supervisor(cfg),
-            controller(cfg),
-            get(cfg, "supervisor", "supervisor_bin"),
-            get(cfg, "controller", "controller_bin"),
-            get(cfg, "supervisor", "runtime_wrapper"),
-            get(cfg, "supervisor", "iface"),
-        ]
-    )
+    ses = os.environ.get("RT_TRACE_SESSION_ID", "")
+    mpg = os.environ.get("RT_TRACE_MEASUREMENTS_PER_GROUP", "")
+    exp = os.environ.get("RT_TRACE_EXPORTERS", "") == "1"
+    if ses == "-":
+        ses = ""
+    _start_stack(cfg, trace_session_id=ses, trace_mpg=mpg, trace_exporters=exp)
+    return 0
 
 
 def cmd_stop(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
@@ -847,11 +843,20 @@ def ssh_jump_script(
     host: str,
     script: str,
     timeout: int = 30,
+    shell_args: list[str] | None = None,
 ) -> tuple[bool, str]:
     try:
         inner_opts = " ".join(shlex.quote(part) for part in SSH_AUTO_OPTS)
+        args_suffix = ""
+        if shell_args:
+            args_suffix = " -- " + " ".join(shlex.quote(a) for a in shell_args)
         completed = subprocess.run(
-            ["ssh", *SSH_AUTO_OPTS, jump, f"cat | ssh {inner_opts} {shlex.quote(host)} sh -s"],
+            [
+                "ssh",
+                *SSH_AUTO_OPTS,
+                jump,
+                f"cat | ssh {inner_opts} {shlex.quote(host)} sh -s{args_suffix}",
+            ],
             input=script,
             capture_output=True,
             text=True,
@@ -954,6 +959,151 @@ def remote_kill_pattern_via_jump(
     timeout: int = 20,
 ) -> None:
     _, out = ssh_jump_script(jump, host, KILL_SCRIPT + _kill_cmd(label, awk_pattern=awk_pattern), timeout=timeout)
+    if out:
+        print(out)
+
+
+VISIONFIVE_START = """\
+set -eu
+SUPERVISOR_BIN=$1
+RUNTIME_WRAPPER=$2
+INTERFACE=$3
+TIMEOUT_US=$4
+TRACE_SESSION_ID=$5
+TRACE_PATH=$6
+TRACE_EXPORTERS=${7:-0}
+
+if [ "$TRACE_SESSION_ID" = - ]; then
+    TRACE_SESSION_ID=
+fi
+
+: > /root/alt-rt-supervisor.log
+if [ -n "$TRACE_SESSION_ID" ]; then
+    : > "$TRACE_PATH"
+    if [ "$TRACE_EXPORTERS" = 1 ] && [ -x /root/rt-supervisor/scripts/trace_exporter.py ]; then
+        nohup /root/rt-supervisor/scripts/trace_exporter.py \
+            --listen 0.0.0.0 --port 9201 "$TRACE_PATH" \
+            >/root/rt-trace-exporter.log 2>&1 &
+        echo "visionfive trace_exporter pid=$!"
+    fi
+    RT_TRACE_PATH="$TRACE_PATH" nohup /root/rt-supervisor/scripts/run_supervisor.sh \
+        "$INTERFACE" "$TIMEOUT_US" "$RUNTIME_WRAPPER" "$SUPERVISOR_BIN" \
+        >/root/alt-rt-supervisor.log 2>&1 &
+else
+    nohup /root/rt-supervisor/scripts/run_supervisor.sh \
+        "$INTERFACE" "$TIMEOUT_US" "$RUNTIME_WRAPPER" "$SUPERVISOR_BIN" \
+        >/root/alt-rt-supervisor.log 2>&1 &
+fi
+echo "alt-rt-supervisor pid=$!"
+"""
+
+ROCKPI_START = """\
+set -eu
+CONTROLLER_BIN=$1
+INTERFACE=$2
+TRACE_SESSION_ID=$3
+TRACE_MPG=$4
+TRACE_PATH=$5
+TRACE_EXPORTERS=${6:-0}
+
+if [ "$TRACE_SESSION_ID" = - ]; then
+    TRACE_SESSION_ID=
+fi
+if [ "$TRACE_MPG" = - ]; then
+    TRACE_MPG=
+fi
+
+: > /root/controller-emu.log
+if [ -n "$TRACE_SESSION_ID" ] && [ -n "$TRACE_MPG" ]; then
+    : > "$TRACE_PATH"
+    if [ "$TRACE_EXPORTERS" = 1 ] && [ -x /root/rt-supervisor/scripts/trace_exporter.py ]; then
+        nohup /root/rt-supervisor/scripts/trace_exporter.py \
+            --listen 0.0.0.0 --port 9201 "$TRACE_PATH" \
+            >/root/rt-trace-exporter.log 2>&1 &
+        echo "rockpi trace_exporter pid=$!"
+    fi
+    RT_TRACE_PATH="$TRACE_PATH" \
+    RT_TRACE_SESSION_ID="$TRACE_SESSION_ID" \
+    RT_TRACE_MEASUREMENTS_PER_GROUP="$TRACE_MPG" \
+        nohup /root/rt-supervisor/scripts/run_controller.sh \
+        "$INTERFACE" "$CONTROLLER_BIN" >/root/controller-emu.log 2>&1 &
+else
+    nohup /root/rt-supervisor/scripts/run_controller.sh \
+        "$INTERFACE" "$CONTROLLER_BIN" >/root/controller-emu.log 2>&1 &
+fi
+echo "controller-emu pid=$!"
+"""
+
+
+def _ssh_script_args(
+    host: str,
+    script: str,
+    shell_args: list[str],
+    timeout: int = 30,
+) -> tuple[bool, str]:
+    try:
+        completed = subprocess.run(
+            [
+                "ssh",
+                *SSH_AUTO_OPTS,
+                host,
+                "sh -s -- " + " ".join(shlex.quote(a) for a in shell_args),
+            ],
+            input=script,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        return completed.returncode == 0, completed.stdout.strip()
+    except subprocess.TimeoutExpired as exc:
+        return False, (exc.stdout or "timeout").strip()
+
+
+def _start_stack(
+    cfg: configparser.ConfigParser,
+    trace_session_id: str = "",
+    trace_mpg: str = "",
+    trace_exporters: bool = False,
+) -> None:
+    cmd_stop(cfg, argparse.Namespace())
+
+    sup = supervisor(cfg)
+    ctrl = controller(cfg)
+    jump = get(cfg, "controller", "ssh_jump")
+    supervisor_bin = get(cfg, "supervisor", "supervisor_bin")
+    controller_bin = get(cfg, "controller", "controller_bin")
+    runtime_wrapper = get(cfg, "supervisor", "runtime_wrapper")
+    iface = get(cfg, "supervisor", "iface")
+
+    ses = trace_session_id or "-"
+    mpg = trace_mpg or "-"
+    exp = "1" if trace_exporters else "0"
+    timeout_us = os.environ.get("TIMEOUT_US", "5000000")
+    trace_sup = opt(cfg, "supervisor", "trace_supervisor_path", "/tmp/rt-supervisor-trace.jsonl")
+    trace_ctrl = opt(cfg, "controller", "trace_controller_path", "/tmp/controller-emu-trace.jsonl")
+
+    _, out = _ssh_script_args(
+        sup,
+        VISIONFIVE_START,
+        [supervisor_bin, runtime_wrapper, iface, timeout_us, ses, trace_sup, exp],
+    )
+    if out:
+        print(out)
+
+    _, out = ssh_jump_script(
+        jump,
+        ctrl,
+        ROCKPI_START,
+        shell_args=[controller_bin, iface, ses, mpg, trace_ctrl, exp],
+    )
+    if out:
+        print(out)
+
+    time.sleep(4)
+    _, out = ssh_check(sup, "/root/pin_visionfive_supervised.sh", timeout=10)
+    if out:
+        print(out)
+    _, out = ssh_jump_check(jump, ctrl, "/root/pin_rockpi_controller.sh", timeout=10)
     if out:
         print(out)
 
