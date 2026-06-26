@@ -429,4 +429,10 @@ scripts/stand.py grafana-stop
 
 Все shell-скрипты в `scripts/` теперь являются compatibility wrappers,
 передающими вызов в `scripts/stand.py`. Полная логика стенда находится
-в Python внутри `stand.py`.
+в Python:
+
+| Файл | Содержание | Строк |
+|------|-----------|-------|
+| `scripts/stand.py` | CLI-интерфейс (парсер + main) | ~160 |
+| `scripts/_lib.py` | Вспомогательные функции (SSH, профиль, утилиты) | ~260 |
+| `scripts/_cmd.py` | Все команды (start, stop, test, deploy и др.) | ~2300 |
