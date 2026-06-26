@@ -1419,7 +1419,6 @@ def deploy_archive(host: str, remote_dir: str, archive: Path, jump: str | None =
         scp_to(host, archive, remote_archive)
     remote_command = (
         "set -eu; "
-        f"rm -rf {shlex.quote(remote_dir)}; "
         f"mkdir -p {shlex.quote(remote_dir)}; "
         f"tar -xzf {remote_archive} -C {shlex.quote(remote_dir)}; "
         f"rm -f {remote_archive}"
