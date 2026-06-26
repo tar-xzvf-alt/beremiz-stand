@@ -706,6 +706,7 @@ def _run_smoke(
         exp = False
 
     print("== Start supervised stack ==")
+    os.environ["TIMEOUT_US"] = "30000000"
     _start_stack(
         cfg,
         trace_session_id=ses,
