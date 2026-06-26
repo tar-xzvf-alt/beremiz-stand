@@ -1902,6 +1902,7 @@ def _start_stack(
     exp = "1" if trace_exporters else "0"
     timeout_us = os.environ.get("TIMEOUT_US", "5000000")
     trace_sup = opt(cfg, "supervisor", "trace_supervisor_path", "/tmp/rt-supervisor-trace.jsonl")
+    trace_ctrl = opt(cfg, "controller", "trace_controller_path", "/tmp/controller-emu-trace.jsonl")
 
     _, out = _ssh_script_args(
         sup,
@@ -1915,7 +1916,7 @@ def _start_stack(
         jump,
         ctrl,
         ROCKPI_START,
-        shell_args=[controller_bin, iface, "-", "-", "/tmp/controller-emu-trace.jsonl", "0"],
+        shell_args=[controller_bin, iface, ses, mpg, trace_ctrl, "0"],
     )
     if out:
         print(out)
