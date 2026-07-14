@@ -69,6 +69,10 @@ scripts/stand.py time-restore
 
 ## 2. Обновить `rt-supervisor` На Платах
 
+Для текущего packaged flow сначала используйте
+[`PACKAGED_SETUP.md`](PACKAGED_SETUP.md): он описывает установку RPM и smoke без
+source deploy/build.
+
 Если нужно обновить `rt-supervisor` на платах из локального checkout:
 
 ```bash

@@ -43,6 +43,10 @@ Expected behavior:
 
 ## Step 2: Package `rt-controller`
 
+Status: done for `rt-controller-0.1.0-alt2`; built for `riscv64` and
+`aarch64`, installed on the stand. Version `0.1.0` is tagged as `v0.1.0`;
+`alt2` is a packaging release bump.
+
 Package one generic RPM, not per-board builds.
 
 Expected package contents:
@@ -58,6 +62,10 @@ Initial packaging choice:
 - orchestration still provides interface, board, transport env and trace env.
 
 ## Step 3: Package `rt-supervisor`
+
+Status: done for `rt-supervisor-0.1.0-alt2`; built for `riscv64` and
+`aarch64`, installed on the stand. Version `0.1.0` is tagged as `v0.1.0`;
+`alt2` is a packaging release bump.
 
 Package the supervised raw-Ethernet runtime side.
 
@@ -76,6 +84,9 @@ Initial packaging choice:
 
 ## Step 4: Use Packaged Supervised Binaries
 
+Status: done in `rt-tester` configs/runners for the RockPI supervised profile.
+The packaged supervised smoke passed on 2026-07-14 with session `1784030431`.
+
 After `rt-controller` and `rt-supervisor` packages exist, update supervised stand
 configs and runners to prefer packaged binaries:
 
@@ -84,6 +95,8 @@ configs and runners to prefer packaged binaries:
 - scripts/configs from `/usr/share/rt-supervisor` and `/usr/share/rt-controller`
 
 Keep source-tree deploy/build mode as an explicit development path.
+
+Fresh-board package setup is documented in [`PACKAGED_SETUP.md`](PACKAGED_SETUP.md).
 
 ## Step 5: Decide `beremiz-stand` Package Scope
 
