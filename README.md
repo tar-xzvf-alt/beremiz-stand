@@ -132,3 +132,5 @@ ERPC://10.42.0.211:3000
 - Вручную controller запускается на RockPI так: `/root/rt-supervisor/scripts/run_controller.sh end0 /root/rt-supervisor/Build/src/controller-emu`.
 - После каждой сборки PLC на VisionFive выполняйте `scripts/sync_supervised_debug_build_from_visionfive.sh`, иначе GUI не найдет локальный `build/VARIABLES.csv`.
 - `alarm` меняется не от GUI и не от receiver, а от GPIO edges, которые RockPI получает на input line.
+- Схема сети, SSH-доступ и восстановление internet routing для VisionFive/RockPI описаны в [NETWORK.md](NETWORK.md).
+- План упаковки `rt-controller`, `rt-supervisor`, `rt-tester` и helper-пакета стенда описан в [ROADMAP.md](ROADMAP.md).
