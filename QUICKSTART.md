@@ -1,13 +1,17 @@
 # Quickstart Для Supervised RT Stand
 
-Это короткий путь для запуска текущего стенда без знания всех внутренних
-скриптов. Единая точка входа:
+Это короткий путь для **Git checkout/source flow**. Он нужен для разработки PLC
+и deploy исходников. Для установки только RPM и проверенного package-only smoke
+используйте [PACKAGED_SETUP.md](PACKAGED_SETUP.md), а не команды PLC deploy из
+этого файла.
+
+Source CLI:
 
 ```bash
 scripts/stand.py
 ```
 
-По умолчанию используется profile:
+В source checkout по умолчанию используется profile:
 
 ```text
 profiles/visionfive-rockpi.conf
@@ -16,15 +20,20 @@ profiles/visionfive-rockpi.conf
 ## 1. Проверить Стенд
 
 ```bash
-cd /home/taranev/work_repos/beremiz-stand
+cd /path/to/beremiz-stand
 scripts/stand.py doctor
 scripts/stand.py status
 ```
 
 `doctor` проверяет локальные утилиты, SSH до VisionFive/RockPI, пути к
 `rt-supervisor`, binaries, runtime wrapper, Arduino port и валидность board names.
-Prometheus/Grafana в этом выводе считаются optional: они могут быть не запущены
-до trace-теста.
+Prometheus/Grafana задуманы как optional и могут быть не запущены до trace-теста,
+но **текущая реализация `doctor` печатает `FAIL` для отсутствующих binaries и
+незапущенных services**. Отсутствующие binaries влияют на exit status; checks
+running services сейчас помечены `FAIL`, но не добавлены в итоговый счетчик.
+До исправления runtime-кода в step 2 follow-up учитывайте это ограничение.
+`status` уже показывает optional services как `WARN` и не считает их причиной
+failure.
 `status` даёт короткий read-only summary текущего runtime/network состояния.
 
 Если после сброса Ethernet-настроек ПК/VisionFive не видно, сначала выполните:
@@ -69,15 +78,9 @@ scripts/stand.py time-restore
 
 ## 2. Обновить `rt-supervisor` На Платах
 
-Для текущего packaged flow сначала используйте
-[`PACKAGED_SETUP.md`](PACKAGED_SETUP.md): он описывает установку RPM и smoke без
-source deploy/build.
-
-После установки `beremiz-stand-tools` отредактируйте
-`/etc/beremiz-stand/stand.conf` и используйте команду `beremiz-stand` вместо
-`scripts/stand.py`.
-
-Если нужно обновить `rt-supervisor` на платах из локального checkout:
+Следующие команды source-only: они требуют локальный checkout `rt-supervisor`
+из `[pc] rt_supervisor_dir` и remote source/build directories. Они не относятся
+к package-only smoke:
 
 ```bash
 scripts/stand.py deploy-rt-supervisor
@@ -94,7 +97,13 @@ scripts/stand.py build-rt-supervisor --clean-first --dry-run
 
 ## 3. Обновить PLC На VisionFive
 
-Если менялся Beremiz project/runtime wrapper, обновите PLC на VisionFive:
+Этот раздел source-only. RPM `beremiz-stand-tools` не содержит
+`beremiz-project/`. Если менялся Beremiz project/runtime wrapper, обновите PLC
+на supervisor-плате:
+
+> **Внимание:** `sync-stand` сначала полностью удаляет remote
+> `beremiz_stand_dir`, затем распаковывает туда текущий checkout. Все
+> remote-only файлы в этой директории будут потеряны.
 
 ```bash
 scripts/stand.py sync-stand
@@ -108,6 +117,7 @@ scripts/stand.py deploy-plc
 
 ## 4. Полный Deploy И Logs
 
+`deploy-all` является source-only и включает source deploy/build и PLC deploy.
 Полный deploy всего стенда одной командой:
 
 ```bash
@@ -180,11 +190,11 @@ http://127.0.0.1:3001/d/rt-trace-stages
 ```bash
 scripts/stand.py trace-summary
 scripts/stand.py trace-summary --session-id 810963
-scripts/stand.py trace-summary --all
+scripts/stand.py trace-summary --host visionfive
 ```
 
-По умолчанию показывает только стадии VisionFive (плата с Beremiz).
-С `--all` добавляются стадии RockPI.
+По умолчанию показываются все hosts. `--host NAME` ограничивает summary одним
+host. Опции `--all` нет.
 
 ## 9. Частые Команды
 
@@ -322,7 +332,10 @@ Board name из `gpio_config.h`. Используется для сборки `c
 
 ### Сетевые Топологии
 
-**С拓扑 1: supervisor — роутер, controller за ним**
+Имена ролей не означают routing role. В текущей физической сети VisionFive 2
+остается router между ПК и RockPI в обеих схемах.
+
+**Топология 1: source flow, VisionFive 2 — supervisor**
 
 ```
 ПК 10.42.0.1 ↔ supervisor (end1 10.42.0.211, end0 10.43.0.1) ↔ controller (end0 10.43.0.2)
@@ -334,17 +347,18 @@ Board name из `gpio_config.h`. Используется для сборки `c
 - `[controller] pc_gateway = 10.43.0.1` (обратно через supervisor)
 - Пример: `visionfive-rockpi.conf`
 
-**Топология 2: supervisor напрямую, controller — роутер**
+**Топология 2: packaged validated, RockPI 4 — supervisor**
 
 ```
-ПК 10.42.0.1 ↔ controller (end1 10.42.0.211, end0 10.43.0.1) ↔ supervisor (end0 10.43.0.2)
+ПК 10.42.0.1 ↔ VisionFive controller/router (end1 10.42.0.211, end0 10.43.0.1) ↔ RockPI supervisor (end0 10.43.0.2)
 ```
 
-- `[controller] enable_ip_forward = yes` (добавить в секцию)
-- `[pc] controller_gateway = 10.42.0.211` (controller)
-- `[supervisor]` — доступен через маршрут ПК `10.43.0.0/24 via 10.42.0.211`
-- `[controller] ssh_jump = root@10.42.0.211` (или такой же как `ssh`, если доступен напрямую)
-- Пример: `rockpi-visionfive.conf` (с `ssh_jump = ssh`)
+- `supervisor`: RockPI `root@10.43.0.2`, `/usr/bin/alt-rt-supervisor`,
+  `/usr/bin/runtime`;
+- `controller`: VisionFive `root@10.42.0.211`, `/usr/bin/controller-emu`;
+- PC route к `10.43.0.0/24` идет via `10.42.0.211`;
+- пример universal profile: `profiles/stand.conf.example`;
+- проверенный smoke config: `/usr/share/rt-tester-tools/configs/stands/rockpi-plc-visionfive2-controller.conf`.
 
 ### Пример Создания Профиля
 
@@ -410,11 +424,11 @@ scripts/stand.py --profile profiles/my-stand.conf network-check
 # 2. Время
 scripts/stand.py --profile profiles/my-stand.conf time-restore
 
-# 3. Deploy и сборка
+# 3. Deploy и сборка (source-only)
 scripts/stand.py --profile profiles/my-stand.conf deploy-rt-supervisor
 scripts/stand.py --profile profiles/my-stand.conf build-rt-supervisor --clean-first
 
-# 4. PLC (только на supervisor)
+# 4. PLC (source-only, только на supervisor)
 scripts/stand.py --profile profiles/my-stand.conf sync-stand
 scripts/stand.py --profile profiles/my-stand.conf build-plc
 scripts/stand.py --profile profiles/my-stand.conf install-runtime-wrapper
@@ -435,9 +449,10 @@ scripts/stand.py grafana-stop
 
 ## Shell Scripts
 
-Все shell-скрипты в `scripts/` теперь являются compatibility wrappers,
-передающими вызов в `scripts/stand.py`. Полная логика стенда находится
-в Python:
+Большинство legacy shell entry points в `scripts/` являются compatibility
+wrappers для `scripts/stand.py`. Это не относится ко всем shell scripts:
+например, `configure_rockpi_link_on_visionfive.sh` выполняет operational SSH
+commands самостоятельно. Основная orchestration logic находится в Python:
 
 | Файл | Содержание | Строк |
 |------|-----------|-------|

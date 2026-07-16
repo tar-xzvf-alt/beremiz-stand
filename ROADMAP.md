@@ -5,6 +5,8 @@ projects into reproducible ALT Linux packages and deployment flows.
 
 ## Step 0: Stand Network Baseline
 
+Status: done and documented in [`NETWORK.md`](NETWORK.md).
+
 Goal: before packaging work, the lab stand must be easy to access and both SBCs
 must have internet access through the PC.
 
@@ -21,12 +23,15 @@ Required state:
 
 ## Step 1: Close Current Source Changes
 
-Verify and commit the current source changes before new packaging work:
+Status: done. Runtime board selection and packaged runner work are present in
+their respective repositories.
+
+Completed scope:
 
 - `rt-tester`: standalone GPIO flow uses packaged `rt-handler` by default.
 - `rt-controller`: board selection is runtime-only via `controller-emu -b <board>`.
 
-Verify `rt-controller` in an environment with CMake:
+Verification used for `rt-controller`:
 
 ```bash
 cmake -S . -B Build
@@ -47,9 +52,9 @@ Status: done for `rt-controller-0.1.0-alt2`; built for `riscv64` and
 `aarch64`, installed on the stand. Version `0.1.0` is tagged as `v0.1.0`;
 `alt2` is a packaging release bump.
 
-Package one generic RPM, not per-board builds.
+The result is one generic RPM, not per-board builds.
 
-Expected package contents:
+Package contents:
 
 - `/usr/bin/controller-emu`
 - `/usr/share/rt-controller/scripts/*`
@@ -67,9 +72,9 @@ Status: done for `rt-supervisor-0.1.0-alt2`; built for `riscv64` and
 `aarch64`, installed on the stand. Version `0.1.0` is tagged as `v0.1.0`;
 `alt2` is a packaging release bump.
 
-Package the supervised raw-Ethernet runtime side.
+The package supplies the supervised raw-Ethernet runtime side.
 
-Expected package contents:
+Package contents:
 
 - `/usr/bin/alt-rt-supervisor`
 - `/usr/bin/runtime` as the demo/runtime ABI example, unless split later;
@@ -92,8 +97,7 @@ configuration examples and observability assets under `/usr/share/rt-tester-tool
 Runtime logs are written to the user's XDG state directory instead of the
 read-only package tree.
 
-After `rt-controller` and `rt-supervisor` packages exist, update supervised stand
-configs and runners to prefer packaged binaries:
+The supervised stand configs and runners use packaged binaries:
 
 - supervisor binary: `/usr/bin/alt-rt-supervisor`
 - controller binary: `/usr/bin/controller-emu`
@@ -105,15 +109,22 @@ Fresh-board package setup is documented in [`PACKAGED_SETUP.md`](PACKAGED_SETUP.
 
 ## Step 5: Decide `beremiz-stand` Package Scope
 
-Status: initial `beremiz-stand-tools-0.1.0-alt1` package exists. It installs
+Status: done for `beremiz-stand-tools-0.1.0-alt2`. It installs
 only PC-side scripts, profiles and docs under `/usr/share/beremiz-stand-tools`
 with `/usr/bin/beremiz-stand` as a wrapper. The default universal configuration
 is `/etc/beremiz-stand/stand.conf` and is preserved across RPM upgrades. PLC
 project/runtime artifacts are not installed by the package.
 
-Do not package PLC runtime pieces until the lower-level packages are stable.
+Known follow-up: `doctor` describes Prometheus and Grafana as optional but
+currently labels missing binaries and stopped services as `FAIL`. Missing
+binaries affect its exit status; service endpoint checks are labelled `FAIL`
+but are not added to the final failure count. Step 2 of the follow-up runtime
+work must make the display and accounting consistently optional. No runtime
+code changes are part of the `alt2` documentation release.
 
-Preferred first package shape:
+PLC runtime pieces remain intentionally outside this package.
+
+Implemented package shape:
 
 - PC-side helper/tools package, for example `beremiz-stand-tools`;
 - `scripts/stand.py`, profiles/templates and docs;
@@ -121,13 +132,21 @@ Preferred first package shape:
 
 ## Step 6: End-to-End Validation
 
-Run both modes on the real stand:
+Status: package-only standalone GPIO and supervised raw-Ethernet flows are done.
+The supervised packaged topology (RockPI supervisor, VisionFive 2 controller)
+passed on 2026-07-16 with session `1784206831`. Source-flow comparison remains
+available as a development path, not as a prerequisite for packaged smoke.
+
+Validated modes:
 
 - standalone GPIO on VisionFive 2 with installed `rt-handler` and no source deploy;
 - supervised raw-Ethernet with installed `rt-controller` and `rt-supervisor`;
-- compare with the previous source-tree flow.
+- previous source-tree flow remains documented separately for development.
 
 ## Step 7: Versioning, Tags, Pushes
+
+Status: `v0.1.0` tags the initial package version. Packaging-only documentation
+updates use `Release: alt2` without changing `Version`.
 
 Rules:
 

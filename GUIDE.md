@@ -1,6 +1,9 @@
 # Пошаговый Запуск Стенда
 
-Инструкция описывает только текущую supervised-схему: Beremiz runtime работает под `rt-supervisor`, а обмен с RockPI идет через raw Ethernet и shared memory.
+Инструкция описывает source flow для supervised-схемы: Beremiz runtime работает
+под `rt-supervisor`, а обмен с RockPI идет через raw Ethernet и shared memory.
+Для validated package-only схемы с обратными ролями плат используйте
+[`PACKAGED_SETUP.md`](PACKAGED_SETUP.md).
 
 ## 1. Проверить Адреса
 
@@ -21,6 +24,9 @@ ssh root@10.42.0.211 'ssh root@10.43.0.2 true'
 ```
 
 ## 2. Подготовить `rt-supervisor`
+
+Разделы 2-10 являются source-only. Команды deploy/build PLC и sync debug build
+требуют Git checkout; RPM `beremiz-stand-tools` не содержит PLC project.
 
 Исходники `rt-supervisor`: https://altlinux.space/besogon1238/rt-supervisor
 
@@ -101,6 +107,10 @@ scripts/stop_supervised_stack.sh
 Скрипты останавливают только точные процессы `controller-emu`, `alt-rt-supervisor`, `Beremiz_service.py` и `trace_exporter.py`.
 
 ## 5. Передать Проект На VisionFive
+
+> **Внимание:** `sync_to_visionfive.sh` вызывает `sync-stand`, который удаляет
+> `/root/beremiz-stand` целиком и заменяет его текущим checkout. Сохраните
+> remote-only файлы и проверьте profile перед запуском.
 
 ```bash
 scripts/sync_to_visionfive.sh

@@ -26,7 +26,7 @@ Host в trace-данных теперь берётся через `gethostname()
 На ПК:
 
 ```bash
-cd /home/taranev/work_repos/beremiz-stand
+cd /path/to/beremiz-stand
 ```
 
 Проверить доступность плат:

@@ -1,21 +1,43 @@
 # Beremiz Supervised RT Stand
 
-Этот репозиторий содержит один Beremiz-проект для текущего стенда:
+Этот репозиторий содержит исходный Beremiz-проект и инструменты управления
+стендом. Есть два разных способа работы:
+
+- **Git checkout (source flow)**: разработка PLC, синхронизация исходников,
+  сборка и deploy на платы;
+- **`beremiz-stand-tools` RPM (package flow)**: PC-side CLI, универсальный
+  шаблон profile и документация. RPM не содержит PLC project и не является
+  заменой checkout для PLC build/deploy.
+
+Историческая source-топология репозитория:
 
 ```text
 Arduino -> RockPI GPIO -> controller-emu -> raw Ethernet -> VisionFive 2
         -> rt-supervisor -> /dev/shm + futex -> Beremiz PLC -> ответ обратно
 ```
 
-ПК не участвует в real-time loop. Он нужен для разработки, запуска scripts, Beremiz GUI и сбора измерений.
+Проверенная package-only топология меняет роли плат местами:
+
+```text
+Arduino -> VisionFive 2 GPIO -> packaged controller-emu -> raw Ethernet -> RockPI 4
+        -> packaged alt-rt-supervisor -> packaged /usr/bin/runtime -> ответ обратно
+```
+
+Физическая сеть в обоих вариантах остается такой, как описано ниже:
+VisionFive 2 соединяет PC segment и RockPI segment. Роль `supervisor` означает
+плату с PLC runtime, роль `controller` означает плату с GPIO; роль не определяет,
+какая плата является сетевым router.
+
+ПК не участвует в real-time loop. Он нужен для разработки, запуска tools,
+Beremiz GUI и сбора измерений.
 
 ## Узлы
 
 | Узел | Назначение |
 | --- | --- |
-| ПК | Beremiz IDE/CLI, scripts, GUI monitoring, rt-tester receiver |
-| VisionFive 2 `10.42.0.211` | `alt-rt-supervisor` и Beremiz runtime |
-| RockPI `10.43.0.2` | `controller-emu`, GPIO input/output и raw Ethernet link |
+| ПК | Beremiz IDE/CLI, orchestration, GUI monitoring, rt-tester receiver |
+| VisionFive 2 `10.42.0.211` | source: supervisor; validated package flow: controller; network router |
+| RockPI `10.43.0.2` | source: controller; validated package flow: supervisor |
 | Arduino Mega | генерирует GPIO pulses и измеряет задержку ответа |
 
 Сеть:
@@ -30,8 +52,8 @@ RockPI end0 10.43.0.2 <-> VisionFive end0 10.43.0.1
 | Path | Что это |
 | --- | --- |
 | `beremiz-project/supervised-raw-plc/` | единственный Beremiz PLC project |
-| `scripts/stand.py` | единая CLI точка входа для всех операций стенда |
-| `scripts/*.sh` | compatibility wrappers, передающие вызов в `stand.py` |
+| `scripts/stand.py` | CLI точка входа source flow; также устанавливается RPM |
+| `scripts/*.sh` | legacy helpers: большинство вызывает `stand.py`, но есть самостоятельные operational scripts |
 | `scripts/check_runtime_status.py` | проверяет `PLC Status` через ERPC |
 | `profiles/visionfive-rockpi.conf` | конфигурация стенда (IP, пути, board names) |
 
@@ -94,11 +116,23 @@ apt-get install python3 openssh-clients openssh-server tar git gcc make binutils
 
 ## Быстрый Запуск
 
-Для обычного пользователя сначала смотрите [QUICKSTART.md](QUICKSTART.md): там
-описан запуск через единый `scripts/stand.py`.
+Для package-only установки и проверенного packaged smoke смотрите
+[PACKAGED_SETUP.md](PACKAGED_SETUP.md). Smoke запускается командой
+`rt-tester-run-stand` с config из `/usr/share/rt-tester-tools`; он не требует
+checkout этого репозитория.
+
+Для разработки из Git checkout смотрите [QUICKSTART.md](QUICKSTART.md). Команды
+`deploy-rt-supervisor`, `build-rt-supervisor`, `sync-stand`, `build-plc`,
+`install-runtime-wrapper`, `start-runtime`, `stop-runtime`, `deploy-plc`,
+`sync-plc-debug-build` и `deploy-all` являются **source-only**: им нужны local
+source trees и/или PLC project, которого нет в RPM.
+
+> **Внимание:** `scripts/stand.py sync-stand` удаляет весь remote
+> `beremiz_stand_dir` (`rm -rf`) и заменяет его содержимым текущего checkout.
+> Перед запуском проверьте profile и сохраните любые нужные remote-only файлы.
 
 Подробные ручные команды находятся в [GUIDE.md](GUIDE.md). Короткий порядок
-через `stand.py`:
+source deploy через `stand.py`:
 
 ```bash
 scripts/stand.py stop
