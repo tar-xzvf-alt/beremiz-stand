@@ -19,11 +19,11 @@ network-router role are independent; VisionFive remains the router in both.
 
 Current validated package set:
 
-- `beremiz-stand-tools-0.1.0-alt2` for PC-side stand orchestration and docs.
-- `rt-tester-tools-0.1.0-alt1` for PC-side measurements and observability data.
-- `rt-handler-0.1.5-alt1` for standalone GPIO on VisionFive 2.
-- `rt-controller-0.1.0-alt2` for the GPIO/raw-Ethernet controller role.
-- `rt-supervisor-0.1.0-alt2` for the supervised runtime role.
+- `beremiz-stand-tools-0.1.1-alt1` for PC-side stand orchestration and docs.
+- `rt-tester-tools-0.1.1-alt1` for PC-side measurements and observability data.
+- `rt-handler-0.1.6-alt1` for standalone GPIO on VisionFive 2.
+- `rt-controller-0.1.1-alt1` for the GPIO/raw-Ethernet controller role.
+- `rt-supervisor-0.1.1-alt1` for the supervised runtime role.
 
 Install the packages built by `gear-hsh` from the PC.
 
@@ -31,8 +31,8 @@ PC-side tools:
 
 ```bash
 rpm -Uvh \
-  /home/taranev/hasher/x86_64_chroot/repo/x86_64/RPMS.hasher/rt-tester-tools-0.1.0-alt1.noarch.rpm \
-  /home/taranev/hasher/x86_64_chroot/repo/x86_64/RPMS.hasher/beremiz-stand-tools-0.1.0-alt2.noarch.rpm
+  /home/taranev/hasher/x86_64_chroot/repo/x86_64/RPMS.hasher/rt-tester-tools-0.1.1-alt1.noarch.rpm \
+  /home/taranev/hasher/x86_64_chroot/repo/x86_64/RPMS.hasher/beremiz-stand-tools-0.1.1-alt1.noarch.rpm
 rt-tester-run-stand --help
 beremiz-stand --help
 ```
@@ -77,18 +77,18 @@ generic template remains in `/usr/share/beremiz-stand-tools/profiles/`.
 VisionFive 2, controller side and standalone GPIO:
 
 ```bash
-scp /home/taranev/hasher/riscv64_chroot/repo/riscv64/RPMS.hasher/rt-handler-0.1.5-alt1.riscv64.rpm \
-    /home/taranev/hasher/riscv64_chroot/repo/riscv64/RPMS.hasher/rt-controller-0.1.0-alt2.riscv64.rpm \
+scp /home/taranev/hasher/riscv64_chroot/repo/riscv64/RPMS.hasher/rt-handler-0.1.6-alt1.riscv64.rpm \
+    /home/taranev/hasher/riscv64_chroot/repo/riscv64/RPMS.hasher/rt-controller-0.1.1-alt1.riscv64.rpm \
     root@10.42.0.211:/tmp/
-ssh root@10.42.0.211 'rpm -Uvh --replacepkgs /tmp/rt-handler-0.1.5-alt1.riscv64.rpm /tmp/rt-controller-0.1.0-alt2.riscv64.rpm'
+ssh root@10.42.0.211 'rpm -Uvh /tmp/rt-handler-0.1.6-alt1.riscv64.rpm /tmp/rt-controller-0.1.1-alt1.riscv64.rpm'
 ```
 
 RockPI 4, supervised runtime side:
 
 ```bash
-scp /home/taranev/hasher/aarch64_chroot/repo/aarch64/RPMS.hasher/rt-supervisor-0.1.0-alt2.aarch64.rpm \
+scp /home/taranev/hasher/aarch64_chroot/repo/aarch64/RPMS.hasher/rt-supervisor-0.1.1-alt1.aarch64.rpm \
     root@10.43.0.2:/tmp/
-ssh root@10.43.0.2 'rpm -Uvh --replacepkgs /tmp/rt-supervisor-0.1.0-alt2.aarch64.rpm'
+ssh root@10.43.0.2 'rpm -Uvh /tmp/rt-supervisor-0.1.1-alt1.aarch64.rpm'
 ```
 
 Install `rt-controller` on RockPI too only if RockPI is used as the controller

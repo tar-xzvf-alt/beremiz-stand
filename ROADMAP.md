@@ -48,9 +48,8 @@ Expected behavior:
 
 ## Step 2: Package `rt-controller`
 
-Status: done for `rt-controller-0.1.0-alt2`; built for `riscv64` and
-`aarch64`, installed on the stand. Version `0.1.0` is tagged as `v0.1.0`;
-`alt2` is a packaging release bump.
+Status: done for `rt-controller-0.1.1-alt1`; built for `riscv64` and
+`aarch64`, installed on the stand.
 
 The result is one generic RPM, not per-board builds.
 
@@ -68,9 +67,8 @@ Initial packaging choice:
 
 ## Step 3: Package `rt-supervisor`
 
-Status: done for `rt-supervisor-0.1.0-alt2`; built for `riscv64` and
-`aarch64`, installed on the stand. Version `0.1.0` is tagged as `v0.1.0`;
-`alt2` is a packaging release bump.
+Status: done for `rt-supervisor-0.1.1-alt1`; built for `riscv64` and
+`aarch64`, installed on the stand.
 
 The package supplies the supervised raw-Ethernet runtime side.
 
@@ -92,10 +90,11 @@ Initial packaging choice:
 Status: done in `rt-tester` configs/runners for the RockPI supervised profile.
 The packaged supervised smoke passed on 2026-07-16 with session `1784206831`.
 
-`rt-tester-tools-0.1.0-alt1` now packages the PC-side runners, receiver,
+`rt-tester-tools-0.1.1-alt1` packages the PC-side runners, receiver,
 configuration examples and observability assets under `/usr/share/rt-tester-tools`.
-Runtime logs are written to the user's XDG state directory instead of the
-read-only package tree.
+Receiver logs and aggregate metrics are written to the user's XDG state
+directory instead of the read-only package tree. Other stand state follows the
+paths in the selected measurement config and defaults to `/tmp` in the examples.
 
 The supervised stand configs and runners use packaged binaries:
 
@@ -109,7 +108,7 @@ Fresh-board package setup is documented in [`PACKAGED_SETUP.md`](PACKAGED_SETUP.
 
 ## Step 5: Decide `beremiz-stand` Package Scope
 
-Status: done for `beremiz-stand-tools-0.1.0-alt2`. It installs
+Status: done for `beremiz-stand-tools-0.1.1-alt1`. It installs
 only PC-side scripts, profiles and docs under `/usr/share/beremiz-stand-tools`
 with `/usr/bin/beremiz-stand` as a wrapper. The default universal configuration
 is `/etc/beremiz-stand/stand.conf` and is preserved across RPM upgrades. PLC
@@ -120,7 +119,7 @@ currently labels missing binaries and stopped services as `FAIL`. Missing
 binaries affect its exit status; service endpoint checks are labelled `FAIL`
 but are not added to the final failure count. Step 2 of the follow-up runtime
 work must make the display and accounting consistently optional. No runtime
-code changes are part of the `alt2` documentation release.
+code changes are part of the `0.1.1-alt1` documentation release.
 
 PLC runtime pieces remain intentionally outside this package.
 

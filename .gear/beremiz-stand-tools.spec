@@ -1,6 +1,6 @@
 Name: beremiz-stand-tools
-Version: 0.1.0
-Release: alt2
+Version: 0.1.1
+Release: alt1
 Summary: PC-side orchestration tools for the Beremiz RT stand
 License: GPLv3
 Group: System/Servers
@@ -63,10 +63,10 @@ test ! -e %buildroot%_datadir/%name/logs
 %_bindir/beremiz-stand
 %_datadir/%name/
 %config(noreplace) %_sysconfdir/beremiz-stand/stand.conf
-%doc README.md QUICKSTART.md GUIDE.md NETWORK.md PACKAGED_SETUP.md ROADMAP.md TEST_PROTOCOL.md
+%doc README.md QUICKSTART.md GUIDE.md NETWORK.md PACKAGED_SETUP.md ROADMAP.md TEST_PROTOCOL.md LICENSE.md
 
 %changelog
-* Thu Jul 16 2026 Taran Evgeniy <taranev@basealt.ru> 0.1.0-alt2
+* Thu Jul 16 2026 Taran Evgeniy <taranev@basealt.ru> 0.1.1-alt1
 - Update README and package deployment documentation.
 
 * Tue Jul 14 2026 Taran Evgeniy <taranev@basealt.ru> 0.1.0-alt1
