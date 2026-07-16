@@ -17,7 +17,12 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_PROFILE = ROOT / "profiles" / "visionfive-rockpi.conf"
+DEFAULT_PROFILE = Path(
+    os.environ.get(
+        "BEREMIZ_STAND_PROFILE",
+        ROOT / "profiles" / "visionfive-rockpi.conf",
+    )
+)
 VALID_BOARDS = {
     "lichee",
     "radxa",
@@ -253,5 +258,4 @@ def cleanup_temp(path: str | None) -> None:
             Path(path).unlink()
         except FileNotFoundError:
             pass
-
 

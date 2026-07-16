@@ -85,7 +85,12 @@ Initial packaging choice:
 ## Step 4: Use Packaged Supervised Binaries
 
 Status: done in `rt-tester` configs/runners for the RockPI supervised profile.
-The packaged supervised smoke passed on 2026-07-14 with session `1784030431`.
+The packaged supervised smoke passed on 2026-07-16 with session `1784206831`.
+
+`rt-tester-tools-0.1.0-alt1` now packages the PC-side runners, receiver,
+configuration examples and observability assets under `/usr/share/rt-tester-tools`.
+Runtime logs are written to the user's XDG state directory instead of the
+read-only package tree.
 
 After `rt-controller` and `rt-supervisor` packages exist, update supervised stand
 configs and runners to prefer packaged binaries:
@@ -99,6 +104,12 @@ Keep source-tree deploy/build mode as an explicit development path.
 Fresh-board package setup is documented in [`PACKAGED_SETUP.md`](PACKAGED_SETUP.md).
 
 ## Step 5: Decide `beremiz-stand` Package Scope
+
+Status: initial `beremiz-stand-tools-0.1.0-alt1` package exists. It installs
+only PC-side scripts, profiles and docs under `/usr/share/beremiz-stand-tools`
+with `/usr/bin/beremiz-stand` as a wrapper. The default universal configuration
+is `/etc/beremiz-stand/stand.conf` and is preserved across RPM upgrades. PLC
+project/runtime artifacts are not installed by the package.
 
 Do not package PLC runtime pieces until the lower-level packages are stable.
 

@@ -7,11 +7,28 @@ It assumes the network from `NETWORK.md` is already restored.
 
 Current validated package set:
 
+- `beremiz-stand-tools-0.1.0-alt1` for PC-side stand orchestration.
+- `rt-tester-tools-0.1.0-alt1` for PC-side measurements and observability data.
 - `rt-handler-0.1.5-alt1` for standalone GPIO on VisionFive 2.
 - `rt-controller-0.1.0-alt2` for the GPIO/raw-Ethernet controller role.
 - `rt-supervisor-0.1.0-alt2` for the supervised runtime role.
 
 Install the packages built by `gear-hsh` from the PC.
+
+PC-side tools:
+
+```bash
+rpm -Uvh \
+  /home/taranev/hasher/x86_64_chroot/repo/x86_64/RPMS.hasher/rt-tester-tools-0.1.0-alt1.noarch.rpm \
+  /home/taranev/hasher/x86_64_chroot/repo/x86_64/RPMS.hasher/beremiz-stand-tools-0.1.0-alt1.noarch.rpm
+rt-tester-run-stand --help
+beremiz-stand --help
+```
+
+Edit `/etc/beremiz-stand/stand.conf` before commands that access the stand.
+RPM upgrades preserve this file with `%config(noreplace)`. The original generic
+template is available at
+`/usr/share/beremiz-stand-tools/profiles/stand.conf.example`.
 
 VisionFive 2, controller side and standalone GPIO:
 
@@ -61,6 +78,13 @@ python3 scripts/run_stand_measurement.py \
   --skip-time-sync
 ```
 
+After `beremiz-stand-tools` is installed, the packaged stand CLI is available as:
+
+```bash
+beremiz-stand status
+beremiz-stand --profile /path/to/another-stand.conf status
+```
+
 Expected result:
 
 - one group is stored in SQLite;
@@ -68,8 +92,8 @@ Expected result:
 - network error/drop counters do not grow;
 - `Measurement completed successfully` is printed.
 
-The current packaged smoke was verified on 2026-07-14 with session
-`1784030431` and 100 measurements in one group.
+The complete PC and board packaged smoke was verified on 2026-07-16 with
+session `1784206831` and 100 measurements in one group.
 
 ## Cleanup Check
 

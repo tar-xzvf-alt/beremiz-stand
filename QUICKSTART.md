@@ -73,6 +73,10 @@ scripts/stand.py time-restore
 [`PACKAGED_SETUP.md`](PACKAGED_SETUP.md): он описывает установку RPM и smoke без
 source deploy/build.
 
+После установки `beremiz-stand-tools` отредактируйте
+`/etc/beremiz-stand/stand.conf` и используйте команду `beremiz-stand` вместо
+`scripts/stand.py`.
+
 Если нужно обновить `rt-supervisor` на платах из локального checkout:
 
 ```bash
