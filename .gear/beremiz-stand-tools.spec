@@ -1,5 +1,5 @@
 Name: beremiz-stand-tools
-Version: 0.1.2
+Version: 0.1.3
 Release: alt1
 Summary: PC-side orchestration tools for the Beremiz RT stand
 License: GPLv3
@@ -67,6 +67,9 @@ test ! -e %buildroot%_datadir/%name/logs
 %doc README.md QUICKSTART.md GUIDE.md NETWORK.md PACKAGED_SETUP.md ROADMAP.md TEST_PROTOCOL.md LICENSE.md
 
 %changelog
+* Fri Jul 17 2026 Taran Evgeniy <taranev@basealt.ru> 0.1.3-alt1
+- Document rt-supervisor 0.1.3 deployment and board clock recovery.
+
 * Fri Jul 17 2026 Taran Evgeniy <taranev@basealt.ru> 0.1.2-alt1
 - Treat optional observability checks consistently in doctor.
 - Accept the runtime controller board name visionfive2.

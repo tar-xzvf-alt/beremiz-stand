@@ -67,9 +67,9 @@ Initial packaging choice:
 
 ## Step 3: Package `rt-supervisor`
 
-Status: done for `rt-supervisor-0.1.2-alt1`; built for `riscv64` and
-`aarch64`. The lifecycle regression is covered by package tests; repeating the
-RockPI stand smoke was explicitly waived for this release.
+Status: done for `rt-supervisor-0.1.3-alt1`; built for `riscv64` and
+`aarch64`. Lifecycle tests cover graceful and forced child cleanup, synchronous
+`execve()` failure reporting, shared-slot reset and bounded restart backoff.
 
 The package supplies the supervised raw-Ethernet runtime side.
 
@@ -109,7 +109,7 @@ Fresh-board package setup is documented in [`PACKAGED_SETUP.md`](PACKAGED_SETUP.
 
 ## Step 5: Decide `beremiz-stand` Package Scope
 
-Status: done for `beremiz-stand-tools-0.1.2-alt1`. It installs
+Status: done for `beremiz-stand-tools-0.1.3-alt1`. It installs
 only PC-side scripts, profiles and docs under `/usr/share/beremiz-stand-tools`
 with `/usr/bin/beremiz-stand` as a wrapper. The default universal configuration
 is `/etc/beremiz-stand/stand.conf` and is preserved across RPM upgrades. PLC
@@ -142,7 +142,7 @@ Validated modes:
 
 ## Step 7: Versioning, Tags, Pushes
 
-Status: current release tags are `v0.1.6` for `rt-handler`, `v0.1.2` for
+Status: current release tags are `v0.1.6` for `rt-handler`, `v0.1.3` for
 `rt-supervisor` and `beremiz-stand`, and `v0.1.1` for `rt-controller` and
 `rt-tester`.
 

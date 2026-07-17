@@ -31,7 +31,7 @@ Arduino Mega is connected to VisionFive 2 GPIO for standalone GPIO testing.
 
 ## Current Verified State
 
-Verified on 2026-07-14:
+Verified again on 2026-07-17:
 
 ```bash
 ssh root@10.42.0.211 true
@@ -212,6 +212,12 @@ ts=$(date +%s)
 ssh root@10.42.0.211 "date -u -s '@$ts' >/dev/null; timedatectl set-ntp true 2>/dev/null || true"
 ssh root@10.43.0.2 "date -u -s '@$ts' >/dev/null; timedatectl set-ntp true 2>/dev/null || true"
 ```
+
+If DNS resolves names but `curl` or `apt-get` reports certificate validation
+errors, compare `date -u` on the PC and both boards before changing forwarding
+or NAT. This was the cause of the apparent internet outage on 2026-07-17: PC
+forwarding and nftables NAT were already active, while both board clocks were
+months or years behind.
 
 ## Final Acceptance Checklist
 
