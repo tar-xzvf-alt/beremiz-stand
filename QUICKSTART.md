@@ -27,13 +27,10 @@ scripts/stand.py status
 
 `doctor` проверяет локальные утилиты, SSH до VisionFive/RockPI, пути к
 `rt-supervisor`, binaries, runtime wrapper, Arduino port и валидность board names.
-Prometheus/Grafana задуманы как optional и могут быть не запущены до trace-теста,
-но **текущая реализация `doctor` печатает `FAIL` для отсутствующих binaries и
-незапущенных services**. Отсутствующие binaries влияют на exit status; checks
-running services сейчас помечены `FAIL`, но не добавлены в итоговый счетчик.
-До исправления runtime-кода в step 2 follow-up учитывайте это ограничение.
-`status` уже показывает optional services как `WARN` и не считает их причиной
-failure.
+Prometheus/Grafana являются optional: отсутствующие binaries и незапущенные
+services отображаются как `WARN` и не влияют на exit status. Обязательные
+локальные инструменты, SSH, runtime paths и board names по-прежнему отображаются
+как `FAIL` и приводят к ненулевому exit status.
 `status` даёт короткий read-only summary текущего runtime/network состояния.
 
 Если после сброса Ethernet-настроек ПК/VisionFive не видно, сначала выполните:

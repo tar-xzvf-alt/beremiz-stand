@@ -1,5 +1,5 @@
 Name: beremiz-stand-tools
-Version: 0.1.1
+Version: 0.1.2
 Release: alt1
 Summary: PC-side orchestration tools for the Beremiz RT stand
 License: GPLv3
@@ -49,6 +49,7 @@ chmod 755 %buildroot%_bindir/beremiz-stand
 
 %check
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/stand.py --help >/dev/null
+PYTHONDONTWRITEBYTECODE=1 python3 tests/test_doctor.py
 PYTHONPATH=scripts PYTHONDONTWRITEBYTECODE=1 python3 -c \
     'from pathlib import Path; from _lib import load_profile; load_profile(Path("profiles/stand.conf.example"))'
 BEREMIZ_STAND_ROOT=%buildroot%_datadir/%name \
@@ -66,6 +67,11 @@ test ! -e %buildroot%_datadir/%name/logs
 %doc README.md QUICKSTART.md GUIDE.md NETWORK.md PACKAGED_SETUP.md ROADMAP.md TEST_PROTOCOL.md LICENSE.md
 
 %changelog
+* Fri Jul 17 2026 Taran Evgeniy <taranev@basealt.ru> 0.1.2-alt1
+- Treat optional observability checks consistently in doctor.
+- Accept the runtime controller board name visionfive2.
+- Add doctor regression tests.
+
 * Thu Jul 16 2026 Taran Evgeniy <taranev@basealt.ru> 0.1.1-alt1
 - Update README and package deployment documentation.
 

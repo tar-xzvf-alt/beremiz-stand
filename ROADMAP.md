@@ -67,8 +67,9 @@ Initial packaging choice:
 
 ## Step 3: Package `rt-supervisor`
 
-Status: done for `rt-supervisor-0.1.1-alt1`; built for `riscv64` and
-`aarch64`, installed on the stand.
+Status: done for `rt-supervisor-0.1.2-alt1`; built for `riscv64` and
+`aarch64`. The lifecycle regression is covered by package tests; repeating the
+RockPI stand smoke was explicitly waived for this release.
 
 The package supplies the supervised raw-Ethernet runtime side.
 
@@ -108,18 +109,15 @@ Fresh-board package setup is documented in [`PACKAGED_SETUP.md`](PACKAGED_SETUP.
 
 ## Step 5: Decide `beremiz-stand` Package Scope
 
-Status: done for `beremiz-stand-tools-0.1.1-alt1`. It installs
+Status: done for `beremiz-stand-tools-0.1.2-alt1`. It installs
 only PC-side scripts, profiles and docs under `/usr/share/beremiz-stand-tools`
 with `/usr/bin/beremiz-stand` as a wrapper. The default universal configuration
 is `/etc/beremiz-stand/stand.conf` and is preserved across RPM upgrades. PLC
 project/runtime artifacts are not installed by the package.
 
-Known follow-up: `doctor` describes Prometheus and Grafana as optional but
-currently labels missing binaries and stopped services as `FAIL`. Missing
-binaries affect its exit status; service endpoint checks are labelled `FAIL`
-but are not added to the final failure count. Step 2 of the follow-up runtime
-work must make the display and accounting consistently optional. No runtime
-code changes are part of the `0.1.1-alt1` documentation release.
+The `doctor` command now treats missing Prometheus/Grafana binaries and stopped
+optional endpoints consistently as `WARN` without affecting its exit status.
+Required tools, paths, SSH checks and board names still fail the command.
 
 PLC runtime pieces remain intentionally outside this package.
 
@@ -144,13 +142,14 @@ Validated modes:
 
 ## Step 7: Versioning, Tags, Pushes
 
-Status: `v0.1.0` tags the initial package version. Packaging-only documentation
-updates use `Release: alt2` without changing `Version`.
+Status: current release tags are `v0.1.6` for `rt-handler`, `v0.1.2` for
+`rt-supervisor` and `beremiz-stand`, and `v0.1.1` for `rt-controller` and
+`rt-tester`.
 
 Rules:
 
-- source/runtime behavior changes require `Version` bump;
-- packaging-only changes can use `Release` bump;
+- any tracked source or documentation change requires a `Version` bump;
+- each new upstream version starts with `Release: alt1`;
 - build RPMs for target architectures;
 - install on boards;
 - run smoke tests;

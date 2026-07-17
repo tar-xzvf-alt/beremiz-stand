@@ -34,6 +34,7 @@ VALID_BOARDS = {
     "rockpi4",
     "repkapi4",
 }
+VALID_CONTROLLER_BOARDS = (VALID_BOARDS - {"starfive"}) | {"visionfive2"}
 SSH_AUTO_OPTS = [
     "-o",
     "BatchMode=yes",
@@ -258,4 +259,3 @@ def cleanup_temp(path: str | None) -> None:
             Path(path).unlink()
         except FileNotFoundError:
             pass
-

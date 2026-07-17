@@ -2233,14 +2233,26 @@ def cmd_doctor(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int
         print_check(check_path(params), f"measurement params: {params}"),
         print_check(check_path(arduino_port), f"Arduino port: {arduino_port}"),
     ]
-    if not check_local_tool("prometheus") and not check_local_tool("/bin/prometheus"):
-        checks.append(print_check(False, "prometheus in PATH or /bin/prometheus"))
-    else:
-        checks.append(print_check(True, "prometheus available"))
-    if not check_local_tool("grafana-server") and not check_path(Path("/bin/grafana-server")):
-        checks.append(print_check(False, "grafana-server in PATH or /bin/grafana-server"))
-    else:
-        checks.append(print_check(True, "grafana-server available"))
+    prometheus_available = check_local_tool("prometheus") or check_local_tool(
+        "/bin/prometheus"
+    )
+    print_status(
+        prometheus_available,
+        "prometheus available"
+        if prometheus_available
+        else "prometheus in PATH or /bin/prometheus",
+        optional=True,
+    )
+    grafana_available = check_local_tool("grafana-server") or check_path(
+        Path("/bin/grafana-server")
+    )
+    print_status(
+        grafana_available,
+        "grafana-server available"
+        if grafana_available
+        else "grafana-server in PATH or /bin/grafana-server",
+        optional=True,
+    )
 
     print("\n== Profile ==")
     supervisor_board = get(cfg, "supervisor", "board")
@@ -2248,7 +2260,10 @@ def cmd_doctor(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int
     checks.extend(
         [
             print_check(supervisor_board in VALID_BOARDS, f"supervisor board: {supervisor_board}"),
-            print_check(controller_board in VALID_BOARDS, f"controller board: {controller_board}"),
+            print_check(
+                controller_board in VALID_CONTROLLER_BOARDS,
+                f"controller board: {controller_board}",
+            ),
             print_check("/" in get(cfg, "supervisor", "supervisor_bin"), "supervisor binary path set"),
             print_check("/" in get(cfg, "controller", "controller_bin"), "controller binary path set"),
         ]
@@ -2283,9 +2298,17 @@ def cmd_doctor(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int
 
     print("\n== Optional Running Services ==")
     prom_url = get(cfg, "pc", "trace_prometheus_url")
-    print_check(http_check(prom_url + "/-/ready"), f"trace Prometheus ready: {prom_url}")
+    print_status(
+        http_check(prom_url + "/-/ready"),
+        f"trace Prometheus ready: {prom_url}",
+        optional=True,
+    )
     grafana_addr = get(cfg, "pc", "trace_grafana_addr")
-    print_check(http_check(f"http://{grafana_addr}/api/health"), f"trace Grafana ready: http://{grafana_addr}")
+    print_status(
+        http_check(f"http://{grafana_addr}/api/health"),
+        f"trace Grafana ready: http://{grafana_addr}",
+        optional=True,
+    )
 
     failures = sum(1 for ok in checks if not ok)
     if failures:
@@ -2293,5 +2316,3 @@ def cmd_doctor(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int
         return 1
     print("\nDoctor passed")
     return 0
-
-
