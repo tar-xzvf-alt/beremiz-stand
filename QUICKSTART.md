@@ -350,8 +350,8 @@ Board name из `gpio_config.h`. Используется для сборки `c
 ПК 10.42.0.1 ↔ VisionFive controller/router (end1 10.42.0.211, end0 10.43.0.1) ↔ RockPI supervisor (end0 10.43.0.2)
 ```
 
-- `supervisor`: RockPI `root@10.43.0.2`, `/usr/bin/alt-rt-supervisor`,
-  `/usr/bin/runtime`;
+- `supervisor`: RockPI `root@10.43.0.2`, `/usr/bin/alt-rt-supervisor` из
+  `rt-supervisor`, `/usr/bin/runtime` из `rt-supervisor-runtime-example`;
 - `controller`: VisionFive `root@10.42.0.211`, `/usr/bin/controller-emu`;
 - PC route к `10.43.0.0/24` идет via `10.42.0.211`;
 - пример universal profile: `profiles/stand.conf.example`;

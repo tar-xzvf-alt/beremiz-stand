@@ -20,7 +20,7 @@ Arduino -> RockPI GPIO -> controller-emu -> raw Ethernet -> VisionFive 2
 
 ```text
 Arduino -> VisionFive 2 GPIO -> packaged controller-emu -> raw Ethernet -> RockPI 4
-        -> packaged alt-rt-supervisor -> packaged /usr/bin/runtime -> ответ обратно
+        -> packaged alt-rt-supervisor -> runtime-example /usr/bin/runtime -> ответ обратно
 ```
 
 Физическая сеть в обоих вариантах остается такой, как описано ниже:

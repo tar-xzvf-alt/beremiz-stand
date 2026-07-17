@@ -67,16 +67,17 @@ Initial packaging choice:
 
 ## Step 3: Package `rt-supervisor`
 
-Status: done for `rt-supervisor-0.1.3-alt1`; built for `riscv64` and
-`aarch64`. Lifecycle tests cover graceful and forced child cleanup, synchronous
-`execve()` failure reporting, shared-slot reset and bounded restart backoff.
+Status: done for `rt-supervisor-0.1.4-alt1`; built for `riscv64` and
+`aarch64`. The demo runtime is split into the matching
+`rt-supervisor-runtime-example` subpackage. The source-only
+`deploy_to_stand.sh` helper is no longer included in the RPM.
 
 The package supplies the supervised raw-Ethernet runtime side.
 
 Package contents:
 
 - `/usr/bin/alt-rt-supervisor`
-- `/usr/bin/runtime` as the demo/runtime ABI example, unless split later;
+- `/usr/bin/runtime` in the separate `rt-supervisor-runtime-example` package;
 - `/usr/share/rt-supervisor/scripts/*`
 - `/usr/share/rt-supervisor/configs/*`
 - docs through RPM `%doc`
@@ -91,7 +92,7 @@ Initial packaging choice:
 Status: done in `rt-tester` configs/runners for the RockPI supervised profile.
 The packaged supervised smoke passed on 2026-07-16 with session `1784206831`.
 
-`rt-tester-tools-0.1.1-alt1` packages the PC-side runners, receiver,
+`rt-tester-tools-0.1.2-alt1` packages the PC-side runners, receiver,
 configuration examples and observability assets under `/usr/share/rt-tester-tools`.
 Receiver logs and aggregate metrics are written to the user's XDG state
 directory instead of the read-only package tree. Other stand state follows the
@@ -109,7 +110,7 @@ Fresh-board package setup is documented in [`PACKAGED_SETUP.md`](PACKAGED_SETUP.
 
 ## Step 5: Decide `beremiz-stand` Package Scope
 
-Status: done for `beremiz-stand-tools-0.1.3-alt1`. It installs
+Status: done for `beremiz-stand-tools-0.1.4-alt1`. It installs
 only PC-side scripts, profiles and docs under `/usr/share/beremiz-stand-tools`
 with `/usr/bin/beremiz-stand` as a wrapper. The default universal configuration
 is `/etc/beremiz-stand/stand.conf` and is preserved across RPM upgrades. PLC
@@ -131,8 +132,9 @@ Implemented package shape:
 
 Status: package-only standalone GPIO and supervised raw-Ethernet flows are done.
 The supervised packaged topology (RockPI supervisor, VisionFive 2 controller)
-passed on 2026-07-16 with session `1784206831`. Source-flow comparison remains
-available as a development path, not as a prerequisite for packaged smoke.
+was rebuilt from clean state and passed with the split runtime package on
+2026-07-17, session `1784289138`. Source-flow comparison remains available as a
+development path, not as a prerequisite for packaged smoke.
 
 Validated modes:
 
@@ -142,9 +144,9 @@ Validated modes:
 
 ## Step 7: Versioning, Tags, Pushes
 
-Status: current release tags are `v0.1.6` for `rt-handler`, `v0.1.3` for
-`rt-supervisor` and `beremiz-stand`, and `v0.1.1` for `rt-controller` and
-`rt-tester`.
+Status: current release tags are `v0.1.6` for `rt-handler`, `v0.1.4` for
+`rt-supervisor` and `beremiz-stand`, `v0.1.2` for `rt-tester`, and `v0.1.1`
+for `rt-controller`.
 
 Rules:
 
