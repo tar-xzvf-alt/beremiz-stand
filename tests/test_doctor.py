@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import _cmd
-from _lib import load_profile
+from _lib import load_profile, runtime_bind_ip
 
 
 class DoctorTest(unittest.TestCase):
@@ -57,6 +57,14 @@ class DoctorTest(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertIn("[FAIL] python3 in PATH", output)
         self.assertIn("Doctor found 4 problem(s)", output)
+
+    def test_runtime_bind_ip_uses_explicit_value(self):
+        self.assertEqual(runtime_bind_ip(self.cfg), "10.43.0.2")
+
+    def test_runtime_bind_ip_defaults_to_supervisor_address(self):
+        self.cfg.remove_option("supervisor", "runtime_bind_ip")
+
+        self.assertEqual(runtime_bind_ip(self.cfg), "10.43.0.2")
 
 
 if __name__ == "__main__":

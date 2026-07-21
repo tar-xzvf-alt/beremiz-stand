@@ -1,5 +1,5 @@
 Name: beremiz-stand-tools
-Version: 0.1.4
+Version: 0.1.5
 Release: alt1
 Summary: PC-side orchestration tools for the Beremiz RT stand
 License: GPLv3
@@ -67,6 +67,9 @@ test ! -e %buildroot%_datadir/%name/logs
 %doc README.md QUICKSTART.md GUIDE.md NETWORK.md PACKAGED_SETUP.md ROADMAP.md TEST_PROTOCOL.md LICENSE.md
 
 %changelog
+* Tue Jul 21 2026 Taran Evgeniy <taranev@basealt.ru> 0.1.5-alt1
+- Fix runtime bind address resolution for PLC wrapper deployment.
+
 * Fri Jul 17 2026 Taran Evgeniy <taranev@basealt.ru> 0.1.4-alt1
 - Document clean package deployment and the split runtime example package.
 

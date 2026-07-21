@@ -148,7 +148,7 @@ def runtime_bind_ip(cfg: configparser.ConfigParser) -> str:
         cfg,
         "supervisor",
         "runtime_bind_ip",
-        addr_host(get(cfg, "supervisor", "pc_addr")),
+        get(cfg, "supervisor", "pc_addr").split("/", 1)[0],
     )
 
 
