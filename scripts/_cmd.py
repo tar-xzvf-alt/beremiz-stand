@@ -40,22 +40,22 @@ def cmd_check(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
     )
 
     print("== ERPC runtime ==")
-    _, out = ssh_check(sup, erpc_cmd, timeout=10)
+    erpc_ok, out = ssh_check(sup, erpc_cmd, timeout=10)
     print(out)
 
     print()
     print(f"== {supervisor_label(cfg)} processes ==")
-    _, out = ssh_script(sup, SUPERVISOR_CHECK)
+    supervisor_ok, out = ssh_script(sup, SUPERVISOR_CHECK)
     if out:
         print(out)
 
     print()
     print(f"== {controller_label(cfg)} processes ==")
-    _, out = ssh_jump_script(jump, ctrl, CONTROLLER_CHECK)
+    controller_ok, out = ssh_jump_script(jump, ctrl, CONTROLLER_CHECK)
     if out:
         print(out)
 
-    return 0
+    return 0 if erpc_ok and supervisor_ok and controller_ok else 1
 
 
 _TRACE_PROM_RUNTIME = "/tmp/rt-trace-prometheus-local"
@@ -560,6 +560,21 @@ def _run_smoke(
             raise StandError(
                 f"Expected {groups} groups, saved {group_count}"
             )
+        if trace_mode == "prometheus":
+            trace_hosts = {row[0] for row in trace_rows}
+            if len(trace_hosts) != 2:
+                raise StandError(
+                    f"Expected trace data from 2 hosts, got {sorted(trace_hosts)}"
+                )
+            mismatched = [
+                f"{host}/{stage}={tgroups}"
+                for host, stage, tgroups, _, _ in trace_rows
+                if tgroups != groups
+            ]
+            if mismatched:
+                raise StandError(
+                    "Trace group count mismatch: " + ", ".join(mismatched)
+                )
     except StandError:
         raise
     except Exception as exc:

@@ -110,7 +110,7 @@ Fresh-board package setup is documented in [`PACKAGED_SETUP.md`](PACKAGED_SETUP.
 
 ## Step 5: Decide `beremiz-stand` Package Scope
 
-Status: done for `beremiz-stand-tools-0.1.7-alt1`. It installs
+Status: done for `beremiz-stand-tools-0.1.8-alt1`. It installs
 only PC-side scripts, profiles and docs under `/usr/share/beremiz-stand-tools`
 with `/usr/bin/beremiz-stand` as a wrapper. The default universal configuration
 is `/etc/beremiz-stand/stand.conf` and is preserved across RPM upgrades. PLC
@@ -145,7 +145,7 @@ Validated modes:
 ## Step 7: Versioning, Tags, Pushes
 
 Status: current release tags are `v0.1.6` for `rt-handler`, `v0.1.6` for
-`rt-supervisor`, `v0.1.7` for `beremiz-stand`, `v0.1.9` for `rt-tester`, and
+`rt-supervisor`, `v0.1.8` for `beremiz-stand`, `v0.1.9` for `rt-tester`, and
 `v0.1.5` for `rt-controller`.
 
 Rules:

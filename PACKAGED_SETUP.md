@@ -18,7 +18,7 @@ only binary and script paths differ.
 
 Current package set:
 
-- `beremiz-stand-tools-0.1.7-alt1` for PC-side stand orchestration and docs.
+- `beremiz-stand-tools-0.1.8-alt1` for PC-side stand orchestration and docs.
 - `rt-tester-tools-0.1.9-alt1` for PC-side measurements and observability data.
 - `rt-handler-0.1.6-alt1` for standalone GPIO on VisionFive 2.
 - `rt-controller-0.1.5-alt1` for the GPIO/raw-Ethernet controller role.
@@ -32,7 +32,7 @@ PC-side tools:
 ```bash
 rpm -Uvh \
   /home/taranev/hasher/x86_64_chroot/repo/x86_64/RPMS.hasher/rt-tester-tools-0.1.9-alt1.noarch.rpm \
-  /home/taranev/hasher/x86_64_chroot/repo/x86_64/RPMS.hasher/beremiz-stand-tools-0.1.7-alt1.noarch.rpm
+  /home/taranev/hasher/x86_64_chroot/repo/x86_64/RPMS.hasher/beremiz-stand-tools-0.1.8-alt1.noarch.rpm
 rt-tester-run-stand --help
 beremiz-stand --help
 ```

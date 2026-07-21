@@ -78,6 +78,16 @@ class SourceFlowTest(unittest.TestCase):
         self.assertIn("/root/rt-controller/scripts/trace_exporter.py", controller_args)
         self.assertEqual(controller_args[-2:], ["1", "2"])
 
+    def test_check_propagates_missing_controller(self):
+        with (
+            mock.patch.object(_cmd, "ssh_check", return_value=(True, "PLC Status: Started")),
+            mock.patch.object(_cmd, "ssh_script", return_value=(True, "supervisor ok")),
+            mock.patch.object(_cmd, "ssh_jump_script", return_value=(False, "controller missing")),
+        ):
+            result = _cmd.cmd_check(self.cfg, argparse.Namespace())
+
+        self.assertEqual(result, 1)
+
 
 if __name__ == "__main__":
     unittest.main()
