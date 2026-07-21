@@ -18,12 +18,12 @@ only binary and script paths differ.
 
 Current package set:
 
-- `beremiz-stand-tools-0.1.6-alt1` for PC-side stand orchestration and docs.
-- `rt-tester-tools-0.1.8-alt1` for PC-side measurements and observability data.
+- `beremiz-stand-tools-0.1.7-alt1` for PC-side stand orchestration and docs.
+- `rt-tester-tools-0.1.9-alt1` for PC-side measurements and observability data.
 - `rt-handler-0.1.6-alt1` for standalone GPIO on VisionFive 2.
 - `rt-controller-0.1.5-alt1` for the GPIO/raw-Ethernet controller role.
-- `rt-supervisor-0.1.4-alt1` for the supervised runtime role.
-- `rt-supervisor-runtime-example-0.1.4-alt1` for `/usr/bin/runtime` used by the demo smoke config.
+- `rt-supervisor-0.1.6-alt1` for the supervised runtime role.
+- `rt-supervisor-runtime-example-0.1.6-alt1` for `/usr/bin/runtime` used by the demo smoke config.
 
 Install the packages built by `gear-hsh` from the PC.
 
@@ -31,8 +31,8 @@ PC-side tools:
 
 ```bash
 rpm -Uvh \
-  /home/taranev/hasher/x86_64_chroot/repo/x86_64/RPMS.hasher/rt-tester-tools-0.1.8-alt1.noarch.rpm \
-  /home/taranev/hasher/x86_64_chroot/repo/x86_64/RPMS.hasher/beremiz-stand-tools-0.1.6-alt1.noarch.rpm
+  /home/taranev/hasher/x86_64_chroot/repo/x86_64/RPMS.hasher/rt-tester-tools-0.1.9-alt1.noarch.rpm \
+  /home/taranev/hasher/x86_64_chroot/repo/x86_64/RPMS.hasher/beremiz-stand-tools-0.1.7-alt1.noarch.rpm
 rt-tester-run-stand --help
 beremiz-stand --help
 ```
@@ -86,10 +86,10 @@ ssh root@10.42.0.211 'rpm -Uvh /tmp/rt-handler-0.1.6-alt1.riscv64.rpm /tmp/rt-co
 RockPI 4, supervised runtime side:
 
 ```bash
-scp /home/taranev/hasher/aarch64_chroot/repo/aarch64/RPMS.hasher/rt-supervisor-0.1.4-alt1.aarch64.rpm \
-    /home/taranev/hasher/aarch64_chroot/repo/aarch64/RPMS.hasher/rt-supervisor-runtime-example-0.1.4-alt1.aarch64.rpm \
+scp /home/taranev/hasher/aarch64_chroot/repo/aarch64/RPMS.hasher/rt-supervisor-0.1.6-alt1.aarch64.rpm \
+    /home/taranev/hasher/aarch64_chroot/repo/aarch64/RPMS.hasher/rt-supervisor-runtime-example-0.1.6-alt1.aarch64.rpm \
     root@10.43.0.2:/tmp/
-ssh root@10.43.0.2 'rpm -Uvh /tmp/rt-supervisor-0.1.4-alt1.aarch64.rpm /tmp/rt-supervisor-runtime-example-0.1.4-alt1.aarch64.rpm'
+ssh root@10.43.0.2 'rpm -Uvh /tmp/rt-supervisor-0.1.6-alt1.aarch64.rpm /tmp/rt-supervisor-runtime-example-0.1.6-alt1.aarch64.rpm'
 ```
 
 Install `rt-controller` on RockPI too only if RockPI is used as the controller

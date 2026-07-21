@@ -1,5 +1,5 @@
 Name: beremiz-stand-tools
-Version: 0.1.6
+Version: 0.1.7
 Release: alt1
 Summary: PC-side orchestration tools for the Beremiz RT stand
 License: GPLv3
@@ -67,6 +67,9 @@ test ! -e %buildroot%_datadir/%name/logs
 %doc README.md QUICKSTART.md GUIDE.md NETWORK.md PACKAGED_SETUP.md ROADMAP.md TEST_PROTOCOL.md LICENSE.md
 
 %changelog
+* Tue Jul 21 2026 Taran Evgeniy <taranev@basealt.ru> 0.1.7-alt1
+- Document the process-group lifecycle release validated by source and package flows.
+
 * Tue Jul 21 2026 Taran Evgeniy <taranev@basealt.ru> 0.1.6-alt1
 - Restore source deployment and builds after the rt-controller split.
 - Gate source-flow measurement startup after controller initialization.

@@ -67,7 +67,7 @@ Initial packaging choice:
 
 ## Step 3: Package `rt-supervisor`
 
-Status: done for `rt-supervisor-0.1.4-alt1`; built for `riscv64` and
+Status: done for `rt-supervisor-0.1.6-alt1`; built for `riscv64` and
 `aarch64`. The demo runtime is split into the matching
 `rt-supervisor-runtime-example` subpackage. The source-only
 `deploy_to_stand.sh` helper is no longer included in the RPM.
@@ -92,7 +92,7 @@ Initial packaging choice:
 Status: done in `rt-tester` configs/runners for the RockPI supervised profile.
 The packaged supervised smoke passed on 2026-07-16 with session `1784206831`.
 
-`rt-tester-tools-0.1.8-alt1` packages the PC-side runners, receiver,
+`rt-tester-tools-0.1.9-alt1` packages the PC-side runners, receiver,
 configuration examples and observability assets under `/usr/share/rt-tester-tools`.
 Receiver logs and aggregate metrics are written to the user's XDG state
 directory instead of the read-only package tree. Other stand state follows the
@@ -110,7 +110,7 @@ Fresh-board package setup is documented in [`PACKAGED_SETUP.md`](PACKAGED_SETUP.
 
 ## Step 5: Decide `beremiz-stand` Package Scope
 
-Status: done for `beremiz-stand-tools-0.1.6-alt1`. It installs
+Status: done for `beremiz-stand-tools-0.1.7-alt1`. It installs
 only PC-side scripts, profiles and docs under `/usr/share/beremiz-stand-tools`
 with `/usr/bin/beremiz-stand` as a wrapper. The default universal configuration
 is `/etc/beremiz-stand/stand.conf` and is preserved across RPM upgrades. PLC
@@ -144,8 +144,8 @@ Validated modes:
 
 ## Step 7: Versioning, Tags, Pushes
 
-Status: current release tags are `v0.1.6` for `rt-handler`, `v0.1.4` for
-`rt-supervisor`, `v0.1.6` for `beremiz-stand`, `v0.1.8` for `rt-tester`, and
+Status: current release tags are `v0.1.6` for `rt-handler`, `v0.1.6` for
+`rt-supervisor`, `v0.1.7` for `beremiz-stand`, `v0.1.9` for `rt-tester`, and
 `v0.1.5` for `rt-controller`.
 
 Rules:
