@@ -45,13 +45,13 @@ def cmd_check(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int:
 
     print()
     print(f"== {supervisor_label(cfg)} processes ==")
-    _, out = ssh_script(sup, VISIONFIVE_CHECK)
+    _, out = ssh_script(sup, SUPERVISOR_CHECK)
     if out:
         print(out)
 
     print()
     print(f"== {controller_label(cfg)} processes ==")
-    _, out = ssh_jump_script(jump, ctrl, ROCKPI_CHECK)
+    _, out = ssh_jump_script(jump, ctrl, CONTROLLER_CHECK)
     if out:
         print(out)
 
@@ -451,45 +451,43 @@ def _run_smoke(
         ses = ""
         exp = False
 
-    print("== Start supervised stack ==")
-    os.environ["TIMEOUT_US"] = "30000000"
-    _start_stack(
-        cfg,
-        trace_session_id=ses,
-        trace_mpg=measurements_per_group,
-        trace_exporters=exp,
-    )
-    print()
-
     print(f"trace_mode={trace_mode}")
-
-    print("== Check supervised stack ==")
-    cmd_check(cfg, argparse.Namespace())
-
-    print()
-    print("== Run receiver smoke ==")
     db_path = Path(smoke_db)
     for suffix in ("", "-shm", "-wal"):
         p = Path(str(db_path) + suffix)
         if p.exists():
             p.unlink()
 
-    run(
-        [
-            sys.executable,
-            str(receiver_dir / "receiver.py"),
-            "--params",
-            str(params_file),
-            "--port",
-            arduino_port,
-            "--session-id",
-            str(session_id),
-            "--groups",
-            str(groups),
-            "--start",
-            "--exit-on-stop",
-        ],
-        env={**os.environ, "RT_TESTER_DIR": get(cfg, "pc", "rt_tester_dir")},
+    receiver_cmd = [
+        sys.executable,
+        str(receiver_dir / "receiver.py"),
+        "--params", str(params_file),
+        "--port", arduino_port,
+        "--session-id", str(session_id),
+        "--groups", str(groups),
+        "--start",
+        "--start-gate-stdin",
+        "--exit-on-stop",
+    ]
+
+    def start_stack() -> None:
+        print("== Start supervised stack ==")
+        os.environ["TIMEOUT_US"] = "30000000"
+        _start_stack(
+            cfg,
+            trace_session_id=ses,
+            trace_mpg=measurements_per_group,
+            trace_exporters=exp,
+            controller_paused=True,
+            trace_groups=str(groups),
+        )
+        _arm_controller(cfg)
+        print("== Run receiver smoke ==")
+
+    _run_gated_receiver(
+        receiver_cmd,
+        {**os.environ, "RT_TESTER_DIR": get(cfg, "pc", "rt_tester_dir")},
+        start_stack,
     )
 
     if trace_mode == "prometheus":
@@ -575,6 +573,7 @@ def cmd_test_smoke(cfg: configparser.ConfigParser, args: argparse.Namespace) -> 
     try:
         return _run_smoke(cfg, args, "off", params)
     finally:
+        cmd_stop(cfg, argparse.Namespace())
         cleanup_temp(tmp_path)
 
 
@@ -585,6 +584,7 @@ def cmd_test_trace(cfg: configparser.ConfigParser, args: argparse.Namespace) -> 
             cmd_trace_start(cfg, args)
         return _run_smoke(cfg, args, "prometheus", params)
     finally:
+        cmd_stop(cfg, argparse.Namespace())
         cleanup_temp(tmp_path)
 
 
@@ -1090,12 +1090,12 @@ def selected_boards(args: argparse.Namespace) -> tuple[bool, bool]:
     return not args.controller_only, not args.supervisor_only
 
 
-def create_rt_supervisor_archive(source: Path) -> Path:
+def create_source_archive(source: Path, name: str) -> Path:
     if not source.is_dir():
-        raise StandError(f"local rt-supervisor dir not found: {source}")
+        raise StandError(f"local {name} dir not found: {source}")
 
     archive = tempfile.NamedTemporaryFile(
-        prefix="rt-supervisor-transfer-",
+        prefix=f"{name}-transfer-",
         suffix=".tgz",
         delete=False,
     )
@@ -1155,9 +1155,10 @@ def ssh_jump_run(jump: str, host: str, command: str) -> int:
     return run(["ssh", *SSH_AUTO_OPTS, jump, remote_cmd])
 
 
-def deploy_archive(host: str, remote_dir: str, archive: Path, jump: str | None = None) -> None:
+def deploy_archive(host: str, remote_dir: str, archive: Path, name: str,
+                   jump: str | None = None) -> None:
     assert_safe_remote_dir(remote_dir)
-    remote_archive = "/tmp/rt-supervisor-transfer.tgz"
+    remote_archive = f"/tmp/{name}-transfer.tgz"
     use_jump = jump and jump != host
     if use_jump:
         scp_to_via_jump(jump, host, archive, remote_archive)
@@ -1175,36 +1176,51 @@ def deploy_archive(host: str, remote_dir: str, archive: Path, jump: str | None =
         ssh_run(host, remote_command)
 
 
-def cmake_build_command(remote_dir: str, board: str, target: str, clean: bool) -> str:
+def cmake_build_command(remote_dir: str, target: str, clean: bool,
+                        board: str | None = None) -> str:
     assert_safe_remote_dir(remote_dir)
     build = f"cmake --build Build --target {shlex.quote(target)}"
     if clean:
         build += " --clean-first"
+    configure = "cmake -S . -B Build"
+    if board:
+        configure += f" -DBOARD={shlex.quote(board)}"
     return (
         "set -eu; "
         f"cd {shlex.quote(remote_dir)}; "
-        f"cmake -S . -B Build -DBOARD={shlex.quote(board)}; "
+        f"{configure}; "
         f"{build}"
     )
 
 
 def cmd_deploy_rt_supervisor(cfg: configparser.ConfigParser, args: argparse.Namespace) -> int:
     deploy_supervisor, deploy_controller = selected_boards(args)
-    archive = create_rt_supervisor_archive(local_rt_supervisor(cfg))
+    archives: list[Path] = []
     try:
+        supervisor_archive = None
+        controller_archive = None
+        if deploy_supervisor:
+            supervisor_archive = create_source_archive(
+                local_rt_supervisor(cfg), "rt-supervisor")
+            archives.append(supervisor_archive)
+        if deploy_controller:
+            controller_archive = create_source_archive(
+                local_rt_controller(cfg), "rt-controller")
+            archives.append(controller_archive)
         if args.dry_run:
             sup_label = supervisor_label(cfg)
             ctrl_label = controller_label(cfg)
-            print(f"Created archive: {archive}")
             if deploy_supervisor:
+                print(f"Created rt-supervisor archive: {supervisor_archive}")
                 print(
                     f"Would deploy to {sup_label}: "
                     f"{supervisor(cfg)}:{get(cfg, 'supervisor', 'rt_supervisor_dir')}"
                 )
             if deploy_controller:
+                print(f"Created rt-controller archive: {controller_archive}")
                 print(
                     f"Would deploy to {ctrl_label}: "
-                    f"{controller(cfg)}:{get(cfg, 'controller', 'rt_supervisor_dir')}"
+                    f"{controller(cfg)}:{get(cfg, 'controller', 'rt_controller_dir')}"
                 )
             return 0
         sup_label = supervisor_label(cfg)
@@ -1214,18 +1230,21 @@ def cmd_deploy_rt_supervisor(cfg: configparser.ConfigParser, args: argparse.Name
             deploy_archive(
                 supervisor(cfg),
                 get(cfg, "supervisor", "rt_supervisor_dir"),
-                archive,
+                supervisor_archive,
+                "rt-supervisor",
             )
         if deploy_controller:
-            print(f"== Deploy rt-supervisor to {ctrl_label} ==")
+            print(f"== Deploy rt-controller to {ctrl_label} ==")
             deploy_archive(
                 controller(cfg),
-                get(cfg, "controller", "rt_supervisor_dir"),
-                archive,
+                get(cfg, "controller", "rt_controller_dir"),
+                controller_archive,
+                "rt-controller",
                 jump=get(cfg, "controller", "ssh_jump"),
             )
     finally:
-        archive.unlink(missing_ok=True)
+        for archive in archives:
+            archive.unlink(missing_ok=True)
     return 0
 
 
@@ -1233,13 +1252,12 @@ def cmd_build_rt_supervisor(cfg: configparser.ConfigParser, args: argparse.Names
     build_supervisor, build_controller = selected_boards(args)
     supervisor_command = cmake_build_command(
         get(cfg, "supervisor", "rt_supervisor_dir"),
-        get(cfg, "supervisor", "board"),
         "alt-rt-supervisor",
         args.clean_first,
+        board=get(cfg, "supervisor", "board"),
     )
     controller_command = cmake_build_command(
-        get(cfg, "controller", "rt_supervisor_dir"),
-        get(cfg, "controller", "board"),
+        get(cfg, "controller", "rt_controller_dir"),
         "controller-emu",
         args.clean_first,
     )
@@ -1461,7 +1479,7 @@ def remote_kill_pattern_via_jump(
         print(out)
 
 
-VISIONFIVE_START = """\
+SUPERVISOR_START = """\
 set -eu
 SUPERVISOR_BIN=$1
 RUNTIME_WRAPPER=$2
@@ -1470,6 +1488,8 @@ TIMEOUT_US=$4
 TRACE_SESSION_ID=$5
 TRACE_PATH=$6
 TRACE_EXPORTERS=${7:-0}
+RUNNER=$8
+EXPORTER=$9
 
 if [ "$TRACE_SESSION_ID" = - ]; then
     TRACE_SESSION_ID=
@@ -1478,31 +1498,36 @@ fi
 : > /root/alt-rt-supervisor.log
 if [ -n "$TRACE_SESSION_ID" ]; then
     : > "$TRACE_PATH"
-    if [ "$TRACE_EXPORTERS" = 1 ] && [ -x /root/rt-supervisor/scripts/trace_exporter.py ]; then
-        nohup /root/rt-supervisor/scripts/trace_exporter.py \
+    if [ "$TRACE_EXPORTERS" = 1 ] && [ -x "$EXPORTER" ]; then
+        nohup "$EXPORTER" \
             --listen 0.0.0.0 --port 9201 "$TRACE_PATH" \
             >/root/rt-trace-exporter.log 2>&1 &
-        echo "visionfive trace_exporter pid=$!"
+        echo "supervisor trace_exporter pid=$!"
     fi
-    RT_TRACE_PATH="$TRACE_PATH" nohup /root/rt-supervisor/scripts/run_supervisor.sh \
+    RT_TRACE_PATH="$TRACE_PATH" nohup "$RUNNER" \
         "$INTERFACE" "$TIMEOUT_US" "$RUNTIME_WRAPPER" "$SUPERVISOR_BIN" \
         >/root/alt-rt-supervisor.log 2>&1 &
 else
-    nohup /root/rt-supervisor/scripts/run_supervisor.sh \
+    nohup "$RUNNER" \
         "$INTERFACE" "$TIMEOUT_US" "$RUNTIME_WRAPPER" "$SUPERVISOR_BIN" \
         >/root/alt-rt-supervisor.log 2>&1 &
 fi
 echo "alt-rt-supervisor pid=$!"
 """
 
-ROCKPI_START = """\
+CONTROLLER_START = """\
 set -eu
 CONTROLLER_BIN=$1
 INTERFACE=$2
-TRACE_SESSION_ID=$3
-TRACE_MPG=$4
-TRACE_PATH=$5
-TRACE_EXPORTERS=${6:-0}
+BOARD=$3
+TRACE_SESSION_ID=$4
+TRACE_MPG=$5
+TRACE_PATH=$6
+TRACE_EXPORTERS=${7:-0}
+RUNNER=$8
+EXPORTER=$9
+START_PAUSED=${10:-0}
+TRACE_GROUPS=${11:--}
 
 if [ "$TRACE_SESSION_ID" = - ]; then
     TRACE_SESSION_ID=
@@ -1514,25 +1539,28 @@ fi
 : > /root/controller-emu.log
 if [ -n "$TRACE_SESSION_ID" ] && [ -n "$TRACE_MPG" ]; then
     : > "$TRACE_PATH"
-    if [ "$TRACE_EXPORTERS" = 1 ] && [ -x /root/rt-supervisor/scripts/trace_exporter.py ]; then
-        nohup /root/rt-supervisor/scripts/trace_exporter.py \
+    if [ "$TRACE_EXPORTERS" = 1 ] && [ -x "$EXPORTER" ]; then
+        nohup "$EXPORTER" \
             --listen 0.0.0.0 --port 9201 "$TRACE_PATH" \
             >/root/rt-trace-exporter.log 2>&1 &
-        echo "rockpi trace_exporter pid=$!"
+        echo "controller trace_exporter pid=$!"
     fi
     RT_TRACE_PATH="$TRACE_PATH" \
     RT_TRACE_SESSION_ID="$TRACE_SESSION_ID" \
     RT_TRACE_MEASUREMENTS_PER_GROUP="$TRACE_MPG" \
-        nohup /root/rt-supervisor/scripts/run_controller.sh \
-        "$INTERFACE" "$CONTROLLER_BIN" >/root/controller-emu.log 2>&1 &
+    RT_TRACE_EXPECTED_GROUPS="$TRACE_GROUPS" \
+    RT_MEASUREMENT_START_PAUSED="$START_PAUSED" \
+        nohup "$RUNNER" "$INTERFACE" "$BOARD" "$CONTROLLER_BIN" \
+        >/root/controller-emu.log 2>&1 &
 else
-    nohup /root/rt-supervisor/scripts/run_controller.sh \
-        "$INTERFACE" "$CONTROLLER_BIN" >/root/controller-emu.log 2>&1 &
+    RT_MEASUREMENT_START_PAUSED="$START_PAUSED" \
+        nohup "$RUNNER" "$INTERFACE" "$BOARD" "$CONTROLLER_BIN" \
+        >/root/controller-emu.log 2>&1 &
 fi
 echo "controller-emu pid=$!"
 """
 
-VISIONFIVE_CHECK = """\
+SUPERVISOR_CHECK = """\
 set -eu
 supervisor_pids=$(pgrep -x alt-rt-supervis 2>/dev/null | tr '\\n' ' ' || true)
 runtime_pids=$(ps -eo pid,args | awk '/[B]eremiz_service.py/ { print $1 }' | tr '\\n' ' ')
@@ -1578,7 +1606,7 @@ done
 exit "$failed"
 """
 
-ROCKPI_CHECK = """\
+CONTROLLER_CHECK = """\
 set -eu
 pids=$(pgrep -x controller-emu 2>/dev/null | tr '\\n' ' ' || true)
 if [ -z "$pids" ]; then
@@ -1627,11 +1655,61 @@ def _ssh_script_args(
         return False, (exc.stdout or "timeout").strip()
 
 
+def _arm_controller(cfg: configparser.ConfigParser) -> None:
+    ok, out = ssh_jump_check(
+        get(cfg, "controller", "ssh_jump"),
+        controller(cfg),
+        "pkill -USR1 -x controller-emu; sleep 0.1",
+        timeout=10,
+    )
+    if out:
+        print(out)
+    if not ok:
+        raise StandError("failed to arm controller measurement processing")
+
+
+def _run_gated_receiver(cmd: list[str], env: dict[str, str], on_ready) -> None:
+    print("+ " + " ".join(cmd), flush=True)
+    proc = subprocess.Popen(
+        cmd,
+        cwd=ROOT,
+        env=env,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    ready = False
+    assert proc.stdin is not None
+    assert proc.stdout is not None
+    try:
+        for raw_line in proc.stdout:
+            line = raw_line.rstrip("\n")
+            print(line, flush=True)
+            if line == "Arduino ready for target start":
+                on_ready()
+                proc.stdin.write("start\n")
+                proc.stdin.flush()
+                ready = True
+    except Exception:
+        proc.terminate()
+        proc.wait(timeout=5)
+        raise
+    returncode = proc.wait()
+    if not ready:
+        raise StandError("receiver exited before Arduino readiness barrier")
+    if returncode != 0:
+        raise StandError(f"receiver failed with exit code {returncode}")
+
+
 def _start_stack(
     cfg: configparser.ConfigParser,
     trace_session_id: str = "",
     trace_mpg: str = "",
     trace_exporters: bool = False,
+    controller_paused: bool = False,
+    trace_groups: str = "",
 ) -> None:
     cmd_stop(cfg, argparse.Namespace())
 
@@ -1641,7 +1719,11 @@ def _start_stack(
     supervisor_bin = get(cfg, "supervisor", "supervisor_bin")
     controller_bin = get(cfg, "controller", "controller_bin")
     runtime_wrapper = get(cfg, "supervisor", "runtime_wrapper")
-    iface = get(cfg, "supervisor", "iface")
+    supervisor_iface = get(cfg, "supervisor", "iface")
+    controller_iface = get(cfg, "controller", "iface")
+    controller_board = get(cfg, "controller", "board")
+    supervisor_source = get(cfg, "supervisor", "rt_supervisor_dir")
+    controller_source = get(cfg, "controller", "rt_controller_dir")
 
     ses = trace_session_id or "-"
     mpg = trace_mpg or "-"
@@ -1650,30 +1732,54 @@ def _start_stack(
     trace_sup = opt(cfg, "supervisor", "trace_supervisor_path", "/tmp/rt-supervisor-trace.jsonl")
     trace_ctrl = opt(cfg, "controller", "trace_controller_path", "/tmp/controller-emu-trace.jsonl")
 
-    _, out = _ssh_script_args(
+    ok, out = _ssh_script_args(
         sup,
-        VISIONFIVE_START,
-        [supervisor_bin, runtime_wrapper, iface, timeout_us, ses, trace_sup, exp],
+        SUPERVISOR_START,
+        [
+            supervisor_bin, runtime_wrapper, supervisor_iface, timeout_us,
+            ses, trace_sup, exp,
+            opt(cfg, "supervisor", "runner",
+                f"{supervisor_source}/scripts/run_supervisor.sh"),
+            opt(cfg, "supervisor", "trace_exporter",
+                f"{supervisor_source}/scripts/trace_exporter.py"),
+        ],
     )
     if out:
         print(out)
+    if not ok:
+        raise StandError("failed to start supervisor")
 
-    _, out = ssh_jump_script(
+    ok, out = ssh_jump_script(
         jump,
         ctrl,
-        ROCKPI_START,
-        shell_args=[controller_bin, iface, ses, mpg, trace_ctrl, "0"],
+        CONTROLLER_START,
+        shell_args=[
+            controller_bin, controller_iface, controller_board, ses, mpg,
+            trace_ctrl, exp,
+            opt(cfg, "controller", "runner",
+                f"{controller_source}/scripts/run_controller.sh"),
+            opt(cfg, "controller", "trace_exporter",
+                f"{controller_source}/scripts/trace_exporter.py"),
+            "1" if controller_paused else "0",
+            trace_groups or "-",
+        ],
     )
     if out:
         print(out)
+    if not ok:
+        raise StandError("failed to start controller")
 
     time.sleep(4)
-    _, out = ssh_check(sup, supervisor_pinning(cfg), timeout=10)
+    ok, out = ssh_check(sup, supervisor_pinning(cfg), timeout=10)
     if out:
         print(out)
-    _, out = ssh_jump_check(jump, ctrl, controller_pinning(cfg), timeout=10)
+    if not ok:
+        raise StandError("failed to pin supervisor")
+    ok, out = ssh_jump_check(jump, ctrl, controller_pinning(cfg), timeout=10)
     if out:
         print(out)
+    if not ok:
+        raise StandError("failed to pin controller")
 
 
 def http_check(url: str, timeout: int = 3) -> bool:
@@ -2219,6 +2325,7 @@ def cmd_doctor(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int
 
     rt_tester_dir = Path(get(cfg, "pc", "rt_tester_dir"))
     rt_supervisor_dir = local_rt_supervisor(cfg)
+    rt_controller_dir = local_rt_controller(cfg)
     params = Path(get(cfg, "measurement", "params"))
     arduino_port = Path(get(cfg, "pc", "arduino_port"))
 
@@ -2230,6 +2337,7 @@ def cmd_doctor(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int
         print_check(check_local_tool("tar"), "tar in PATH"),
         print_check(check_path(rt_tester_dir), f"rt-tester dir: {rt_tester_dir}"),
         print_check(check_path(rt_supervisor_dir), f"rt-supervisor dir: {rt_supervisor_dir}"),
+        print_check(check_path(rt_controller_dir), f"rt-controller dir: {rt_controller_dir}"),
         print_check(check_path(params), f"measurement params: {params}"),
         print_check(check_path(arduino_port), f"Arduino port: {arduino_port}"),
     ]
@@ -2290,7 +2398,7 @@ def cmd_doctor(cfg: configparser.ConfigParser, _args: argparse.Namespace) -> int
     checks.append(print_check(ok, f"ssh {ctrl} via {jump}", out))
     if ok:
         for label, path in (
-            ("rt-supervisor dir", get(cfg, "controller", "rt_supervisor_dir")),
+            ("rt-controller dir", get(cfg, "controller", "rt_controller_dir")),
             ("controller-emu", get(cfg, "controller", "controller_bin")),
         ):
             path_ok, path_out = ssh_jump_check(jump, ctrl, f"test -e {path}")

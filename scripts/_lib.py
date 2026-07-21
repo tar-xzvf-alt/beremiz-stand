@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PROFILE = Path(
     os.environ.get(
         "BEREMIZ_STAND_PROFILE",
-        ROOT / "profiles" / "visionfive-rockpi.conf",
+        ROOT / "profiles" / "rockpi-visionfive.conf",
     )
 )
 VALID_BOARDS = {
@@ -29,12 +29,12 @@ VALID_BOARDS = {
     "bcvm",
     "bvc",
     "bvc_arm",
-    "starfive",
+    "visionfive2",
     "mangopi",
     "rockpi4",
     "repkapi4",
 }
-VALID_CONTROLLER_BOARDS = (VALID_BOARDS - {"starfive"}) | {"visionfive2"}
+VALID_CONTROLLER_BOARDS = VALID_BOARDS
 SSH_AUTO_OPTS = [
     "-o",
     "BatchMode=yes",
@@ -121,6 +121,10 @@ def script(name: str) -> str:
 
 def local_rt_supervisor(cfg: configparser.ConfigParser) -> Path:
     return Path(get(cfg, "pc", "rt_supervisor_dir"))
+
+
+def local_rt_controller(cfg: configparser.ConfigParser) -> Path:
+    return Path(get(cfg, "pc", "rt_controller_dir"))
 
 
 def supervisor(cfg: configparser.ConfigParser) -> str:

@@ -1,5 +1,5 @@
 Name: beremiz-stand-tools
-Version: 0.1.5
+Version: 0.1.6
 Release: alt1
 Summary: PC-side orchestration tools for the Beremiz RT stand
 License: GPLv3
@@ -49,7 +49,7 @@ chmod 755 %buildroot%_bindir/beremiz-stand
 
 %check
 PYTHONDONTWRITEBYTECODE=1 python3 scripts/stand.py --help >/dev/null
-PYTHONDONTWRITEBYTECODE=1 python3 tests/test_doctor.py
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 PYTHONPATH=scripts PYTHONDONTWRITEBYTECODE=1 python3 -c \
     'from pathlib import Path; from _lib import load_profile; load_profile(Path("profiles/stand.conf.example"))'
 BEREMIZ_STAND_ROOT=%buildroot%_datadir/%name \
@@ -67,6 +67,10 @@ test ! -e %buildroot%_datadir/%name/logs
 %doc README.md QUICKSTART.md GUIDE.md NETWORK.md PACKAGED_SETUP.md ROADMAP.md TEST_PROTOCOL.md LICENSE.md
 
 %changelog
+* Tue Jul 21 2026 Taran Evgeniy <taranev@basealt.ru> 0.1.6-alt1
+- Restore source deployment and builds after the rt-controller split.
+- Gate source-flow measurement startup after controller initialization.
+
 * Tue Jul 21 2026 Taran Evgeniy <taranev@basealt.ru> 0.1.5-alt1
 - Fix runtime bind address resolution for PLC wrapper deployment.
 

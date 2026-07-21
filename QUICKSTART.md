@@ -14,7 +14,7 @@ scripts/stand.py
 В source checkout по умолчанию используется profile:
 
 ```text
-profiles/visionfive-rockpi.conf
+profiles/rockpi-visionfive.conf
 ```
 
 ## 1. Проверить Стенд
@@ -26,7 +26,7 @@ scripts/stand.py status
 ```
 
 `doctor` проверяет локальные утилиты, SSH до VisionFive/RockPI, пути к
-`rt-supervisor`, binaries, runtime wrapper, Arduino port и валидность board names.
+`rt-supervisor`, `rt-controller`, binaries, runtime wrapper, Arduino port и валидность board names.
 Prometheus/Grafana являются optional: отсутствующие binaries и незапущенные
 services отображаются как `WARN` и не влияют на exit status. Обязательные
 локальные инструменты, SSH, runtime paths и board names по-прежнему отображаются
@@ -75,8 +75,8 @@ scripts/stand.py time-restore
 
 ## 2. Обновить `rt-supervisor` На Платах
 
-Следующие команды source-only: они требуют локальный checkout `rt-supervisor`
-из `[pc] rt_supervisor_dir` и remote source/build directories. Они не относятся
+Следующие команды source-only: они требуют локальные checkout `rt-supervisor` и
+`rt-controller` из `[pc]` и отдельные remote source/build directories. Они не относятся
 к package-only smoke:
 
 ```bash
@@ -84,7 +84,7 @@ scripts/stand.py deploy-rt-supervisor
 scripts/stand.py build-rt-supervisor --clean-first
 ```
 
-Команды собирают нативно на VisionFive/RockPI с board names из profile.
+Команды собирают supervisor на RockPI и controller на VisionFive.
 Перед реальным обновлением можно проверить действия без записи на платы:
 
 ```bash
@@ -244,6 +244,7 @@ scripts/stand.py collect-logs
 |------|----------|--------|
 | `rt_tester_dir` | Путь к `rt-tester` | `/home/user/work_repos/rt/rt-tester` |
 | `rt_supervisor_dir` | Путь к `rt-supervisor` (для deploy) | `/home/user/work_repos/rt/rt-supervisor` |
+| `rt_controller_dir` | Путь к `rt-controller` (для deploy) | `/home/user/work_repos/rt/rt-controller` |
 | `arduino_port` | Последовательный порт Arduino | `/dev/ttyACM0` |
 | `ethernet_iface` | Ethernet-интерфейс ПК, подключённый к стенду | `enp2s0` |
 | `ethernet_connection` | Имя NetworkManager-подключения | `Проводное подключение 1` |
@@ -259,9 +260,9 @@ scripts/stand.py collect-logs
 
 | Ключ | Описание | Пример |
 |------|----------|--------|
-| `ssh` | SSH-строка для подключения | `root@10.42.0.211` |
-| `label` | Отображаемое имя | `VisionFive` |
-| `board` | Имя платы для сборки `-DBOARD=` (см. таблицу) | `repkapi4` |
+| `ssh` | SSH-строка для подключения | `root@10.43.0.2` |
+| `label` | Отображаемое имя | `RockPI` |
+| `board` | Имя supervisor-платы | `rockpi4` |
 | `iface` | Интерфейс для raw Ethernet | `end0` |
 | `pc_iface` | Интерфейс, смотрящий в сторону ПК | `end1` |
 | `pc_connection` | Имя NetworkManager-подключения на `pc_iface` | `end1` |
@@ -285,10 +286,10 @@ scripts/stand.py collect-logs
 
 | Ключ | Описание | Пример |
 |------|----------|--------|
-| `ssh` | SSH-строка для подключения | `root@10.43.0.2` |
+| `ssh` | SSH-строка для подключения | `root@10.42.0.211` |
 | `ssh_jump` | SSH-jump хост (если controller не доступен с ПК напрямую). Укажите тот же `ssh`, если доступен напрямую | `root@10.42.0.211` |
-| `label` | Отображаемое имя | `RockPI` |
-| `board` | Имя платы для сборки `-DBOARD=` (см. таблицу) | `rockpi4` |
+| `label` | Отображаемое имя | `VisionFive` |
+| `board` | Обязательное runtime-имя controller-платы | `visionfive2` |
 | `iface` | Интерфейс для raw Ethernet | `end0` |
 | `connection` | Имя NetworkManager-подключения | `end0-static` |
 | `addr` | Адрес на `iface` | `10.43.0.2/24` |
@@ -296,9 +297,9 @@ scripts/stand.py collect-logs
 | `pc_gateway` | Шлюз от controller к ПК | `10.43.0.1` |
 | `uart` | UART-устройство на ПК для доступа к controller | `/dev/ttyUSB0` |
 | `uart_baud` | Baud rate UART | `1500000` |
-| `rt_supervisor_dir` | Путь к `rt-supervisor` на плате | `/root/rt-supervisor` |
-| `controller_bin` | Путь к `controller-emu` на плате | `/root/rt-supervisor/Build/src/controller-emu` |
-| `pinning_script` | Путь к скрипту RT-pinning для controller | `/root/pin_rockpi_controller.sh` |
+| `rt_controller_dir` | Путь к `rt-controller` на плате | `/root/rt-controller` |
+| `controller_bin` | Путь к `controller-emu` на плате | `/root/rt-controller/Build/src/controller-emu` |
+| `pinning_script` | Команда RT-pinning для controller | `/root/rt-controller/scripts/pin_stand.sh .../controller-visionfive2.conf` |
 
 ### Секция `[measurement]` — Параметры измерений
 
@@ -312,8 +313,8 @@ scripts/stand.py collect-logs
 
 ### Таблица Board Names
 
-Board name из `gpio_config.h`. Используется для сборки `controller-emu`
-(флаг `-DBOARD=`) и в pinning-скриптах:
+Runtime board name из `rt-controller/configs/boards.tsv`. Передаётся как
+`controller-emu -b <board>`:
 
 | Board name | GPIO chip | In/Out offset | Consumer name |
 |------------|-----------|---------------|---------------|
@@ -322,82 +323,33 @@ Board name из `gpio_config.h`. Используется для сборки `c
 | `bvc_arm` | `/dev/gpiochip0` | 0 / 4 | `bvcarm-mo` |
 | `lichee` | `/dev/gpiochip0` | 140 / 144 | `lichee-monitor` |
 | `radxa` | `/dev/gpiochip3` | 10 / 11 | `radxa-monitor` |
-| `starfive` | `/dev/gpiochip0` | 60 / 61 | `starfive-monitor` |
+| `visionfive2` | `/dev/gpiochip0` | 60 / 61 | `visionfive2-monitor` |
 | `mangopi` | `/dev/gpiochip0` | 35 / 36 | `mangopi-monitor` |
 | `rockpi4` | `/dev/gpiochip4` | 6 / 7 | `rockpi4-monitor` |
-| `repkapi4` | `/dev/gpiochip1` | 205 / 204 | `repkapi4-monitor` |
 
 ### Сетевые Топологии
 
 Имена ролей не означают routing role. В текущей физической сети VisionFive 2
 остается router между ПК и RockPI в обеих схемах.
 
-**Топология 1: source flow, VisionFive 2 — supervisor**
-
-```
-ПК 10.42.0.1 ↔ supervisor (end1 10.42.0.211, end0 10.43.0.1) ↔ controller (end0 10.43.0.2)
-```
-
-- `[supervisor] enable_ip_forward = yes`
-- `[pc] controller_gateway = 10.42.0.211` (supervisor)
-- `[controller] ssh_jump = root@10.42.0.211` (через supervisor)
-- `[controller] pc_gateway = 10.43.0.1` (обратно через supervisor)
-- Пример: `visionfive-rockpi.conf`
-
-**Топология 2: packaged validated, RockPI 4 — supervisor**
+**Source и package topology: RockPI 4 — supervisor**
 
 ```
 ПК 10.42.0.1 ↔ VisionFive controller/router (end1 10.42.0.211, end0 10.43.0.1) ↔ RockPI supervisor (end0 10.43.0.2)
 ```
+
+- `[supervisor] enable_ip_forward = no`
+- `[pc] controller_gateway = 10.42.0.211` (VisionFive router)
+- `[controller] ssh_jump = root@10.42.0.211` (controller доступен напрямую)
+- `[controller] pc_gateway = 10.42.0.211`
+- Пример: `rockpi-visionfive.conf`
 
 - `supervisor`: RockPI `root@10.43.0.2`, `/usr/bin/alt-rt-supervisor` из
   `rt-supervisor`, `/usr/bin/runtime` из `rt-supervisor-runtime-example`;
 - `controller`: VisionFive `root@10.42.0.211`, `/usr/bin/controller-emu`;
 - PC route к `10.43.0.0/24` идет via `10.42.0.211`;
 - пример universal profile: `profiles/stand.conf.example`;
-- проверенный smoke config: `/usr/share/rt-tester-tools/configs/stands/rockpi-plc-visionfive2-controller.conf`.
-
-### Пример Создания Профиля
-
-Допустим, нужно сделать StarFive (`starfive`) supervisor, а RockPI (`rockpi4`)
-controller. Копируем существующий профиль:
-
-```bash
-cp profiles/visionfive-rockpi.conf profiles/starfive-rockpi.conf
-```
-
-Меняем:
-
-```ini
-[supervisor]
-ssh = root@10.42.0.100      # IP StarFive
-label = StarFive
-board = starfive             # Board name из таблицы
-pc_iface = end1
-pc_addr = 10.42.0.100/24
-controller_addr = 10.43.0.1/24
-enable_ip_forward = yes      # StarFive — роутер
-runtime_bind_ip = 10.42.0.100
-erpc_url = ERPC://10.42.0.100:3000
-pinning_script = /root/pin_starfive_supervised.sh
-
-[controller]
-ssh = root@10.43.0.2
-ssh_jump = root@10.42.0.100  # через StarFive
-label = RockPI
-board = rockpi4
-addr = 10.43.0.2/24
-pc_gateway = 10.43.0.1       # обратно через StarFive
-pinning_script = /root/pin_rockpi_controller.sh
-```
-
-Проверяем:
-
-```bash
-scripts/stand.py --profile profiles/starfive-rockpi.conf doctor
-scripts/stand.py --profile profiles/starfive-rockpi.conf network-check
-scripts/stand.py --profile profiles/starfive-rockpi.conf status
-```
+- проверенный smoke config: `/usr/share/rt-tester-tools/configs/stands/rockpi-beremiz-visionfive2-controller.conf`.
 
 ### Что Нужно Для Новой Комбинации Плат
 
@@ -405,7 +357,7 @@ scripts/stand.py --profile profiles/starfive-rockpi.conf status
 2. **Pinning scripts** для обеих ролей:
    - Supervisor: `/root/pin_<board>_supervised.sh` — приоритеты `alt-rt-supervisor`, Beremiz, NIC IRQ
    - Controller: `/root/pin_<board>_controller.sh` — приоритеты `controller-emu`, GPIO IRQ, NIC IRQ
-   - Если готовых нет — скопировать из `rt-supervisor/scripts/pin_*` и поправить consumer name, CPU layout, IRQ-паттерны
+   - Используйте role-specific configs из `rt-supervisor/configs/stand` и `rt-controller/configs/stand`
 3. **Beremiz** на supervisor-плате (`apt-get install beremiz matiec`)
 4. **cmake/gcc/libgpiod** на обеих платах (`apt-get install cmake gcc libgpiod-devel`)
 5. **Пакеты на ПК** — `python3`, `ssh`, `scp`, `tar` (см. `doctor`)

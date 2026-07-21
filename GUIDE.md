@@ -1,8 +1,8 @@
 # Пошаговый Запуск Стенда
 
 Инструкция описывает source flow для supervised-схемы: Beremiz runtime работает
-под `rt-supervisor`, а обмен с RockPI идет через raw Ethernet и shared memory.
-Для validated package-only схемы с обратными ролями плат используйте
+под `rt-supervisor` на RockPI, а VisionFive controller передает GPIO requests
+через raw Ethernet и shared memory. Для package-only схемы используйте
 [`PACKAGED_SETUP.md`](PACKAGED_SETUP.md).
 
 ## 1. Проверить Адреса
@@ -12,7 +12,7 @@
 VisionFive end1:    10.42.0.211
 VisionFive end0:    10.43.0.1
 RockPI end0:        10.43.0.2
-Beremiz ERPC:       ERPC://10.42.0.211:3000
+Beremiz ERPC:       ERPC://10.43.0.2:3000
 ```
 
 Быстрая проверка с ПК:
@@ -23,22 +23,23 @@ ssh root@10.42.0.211 true
 ssh root@10.42.0.211 'ssh root@10.43.0.2 true'
 ```
 
-## 2. Подготовить `rt-supervisor`
+## 2. Подготовить `rt-supervisor` И `rt-controller`
 
 Разделы 2-10 являются source-only. Команды deploy/build PLC и sync debug build
 требуют Git checkout; RPM `beremiz-stand-tools` не содержит PLC project.
 
-Исходники `rt-supervisor`: https://altlinux.space/besogon1238/rt-supervisor
+Исходники: https://altlinux.space/besogon1238/rt-supervisor и
+https://altlinux.space/besogon1238/rt-controller
 
-В этом стенде используются два режима `rt-supervisor`:
+В этом стенде используются два отдельных проекта:
 
-- `managed-runtime` на VisionFive: supervisor запускает Beremiz runtime через `-r`;
-- `hardware-controller` на RockPI: `controller-emu` переводит GPIO edges в raw Ethernet requests.
+- `rt-supervisor` на RockPI запускает Beremiz runtime через `-r`;
+- `rt-controller` на VisionFive переводит GPIO edges в raw Ethernet requests.
 
 Подробнее:
 
 - `docs/runtime-abi.md`: shared memory/futex ABI;
-- `docs/boards.md`: GPIO mappings и board names;
+- `rt-controller/configs/boards.tsv`: GPIO mappings и runtime board names;
 - `docs/altlinux-packages.md`: пакеты ALT Linux;
 - `docs/beremiz-runtime.md`: Beremiz wrapper и ручные команды запуска.
 - `docs/install-deploy.md`: layout установки и текущий `/root/rt-supervisor` deploy.
@@ -46,15 +47,15 @@ ssh root@10.42.0.211 'ssh root@10.43.0.2 true'
 На платах должны быть уже собраны:
 
 ```text
-VisionFive: /root/rt-supervisor/Build/src/alt-rt-supervisor
-RockPI:     /root/rt-supervisor/Build/src/controller-emu
+RockPI:     /root/rt-supervisor/Build/src/alt-rt-supervisor
+VisionFive: /root/rt-controller/Build/src/controller-emu
 ```
 
 Также на платах должны быть установлены pinning scripts из `rt-supervisor`:
 
 ```text
-VisionFive: /root/pin_visionfive_supervised.sh
-RockPI:     /root/pin_rockpi_controller.sh
+RockPI:     /root/rt-supervisor/scripts/pin_stand.sh .../supervised-rockpi4.conf
+VisionFive: /root/rt-controller/scripts/pin_stand.sh .../controller-visionfive2.conf
 ```
 
 Пакеты ALT Linux для сборки `rt-supervisor` на VisionFive и RockPI:
@@ -63,14 +64,14 @@ RockPI:     /root/pin_rockpi_controller.sh
 apt-get install cmake gcc make binutils glibc-devel zlib-devel libgpiod-devel
 ```
 
-Пример сборки в `/root/rt-supervisor`:
+Сборка выполняется командами orchestration:
 
 ```bash
-cmake -B Build -DBOARD=repkapi4
-cmake --build Build
+scripts/stand.py deploy-rt-supervisor
+scripts/stand.py build-rt-supervisor --clean-first
 ```
 
-Для RockPI используйте board, соответствующий его конфигурации в `rt-supervisor`.
+Controller board выбирается при запуске как `visionfive2`, не при CMake build.
 
 ## 3. Установить Пакеты ALT Linux
 
@@ -106,7 +107,7 @@ scripts/stop_supervised_stack.sh
 
 Скрипты останавливают только точные процессы `controller-emu`, `alt-rt-supervisor`, `Beremiz_service.py` и `trace_exporter.py`.
 
-## 5. Передать Проект На VisionFive
+## 5. Передать Проект На RockPI
 
 > **Внимание:** `sync_to_visionfive.sh` вызывает `sync-stand`, который удаляет
 > `/root/beremiz-stand` целиком и заменяет его текущим checkout. Сохраните
@@ -122,13 +123,13 @@ scripts/sync_to_visionfive.sh
 /root/beremiz-stand
 ```
 
-## 6. Собрать PLC На VisionFive
+## 6. Собрать PLC На RockPI
 
 ```bash
 scripts/build_supervised_raw_on_visionfive.sh
 ```
 
-Сборка выполняется на VisionFive, потому что runtime artifact должен быть для `riscv64`.
+Сборка выполняется на RockPI, потому что runtime artifact должен быть для `aarch64`.
 
 ## 7. Загрузить PLC В Runtime Directory
 
@@ -165,19 +166,19 @@ TIMEOUT_US=30000000 scripts/start_supervised_stack.sh
 
 Скрипт запускает:
 
-- `alt-rt-supervisor` на VisionFive;
+- `alt-rt-supervisor` на RockPI;
 - Beremiz runtime как child supervisor;
-- `controller-emu` на RockPI;
+- `controller-emu` на VisionFive;
 - RT priorities и CPU affinity через pinning scripts.
 
 Внутри он использует новые wrappers из `rt-supervisor`:
 
 ```text
 /root/rt-supervisor/scripts/run_supervisor.sh
-/root/rt-supervisor/scripts/run_controller.sh
+/root/rt-controller/scripts/run_controller.sh
 ```
 
-Если нужно запустить именно supervisor вручную на VisionFive, команда такая:
+Если нужно запустить именно supervisor вручную на RockPI, команда такая:
 
 ```bash
 /root/rt-supervisor/scripts/run_supervisor.sh \
@@ -190,9 +191,10 @@ TIMEOUT_US=30000000 scripts/start_supervised_stack.sh
 Этот wrapper удаляет старые `/dev/shm/shmem_input` и `/dev/shm/shmem_output`, затем запускает `alt-rt-supervisor -i end0 -t 30000000 -r ...`. Для запуска всего стенда вручную дополнительно нужен controller на RockPI:
 
 ```bash
-/root/rt-supervisor/scripts/run_controller.sh \
+/root/rt-controller/scripts/run_controller.sh \
   end0 \
-  /root/rt-supervisor/Build/src/controller-emu
+  visionfive2 \
+  /root/rt-controller/Build/src/controller-emu
 ```
 
 Проверка:

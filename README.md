@@ -9,18 +9,11 @@
   шаблон profile и документация. RPM не содержит PLC project и не является
   заменой checkout для PLC build/deploy.
 
-Историческая source-топология репозитория:
-
-```text
-Arduino -> RockPI GPIO -> controller-emu -> raw Ethernet -> VisionFive 2
-        -> rt-supervisor -> /dev/shm + futex -> Beremiz PLC -> ответ обратно
-```
-
-Проверенная package-only топология меняет роли плат местами:
+Проверенная source и package топология:
 
 ```text
 Arduino -> VisionFive 2 GPIO -> packaged controller-emu -> raw Ethernet -> RockPI 4
-        -> packaged alt-rt-supervisor -> runtime-example /usr/bin/runtime -> ответ обратно
+        -> alt-rt-supervisor -> /dev/shm + futex -> Beremiz PLC -> ответ обратно
 ```
 
 Физическая сеть в обоих вариантах остается такой, как описано ниже:
@@ -36,8 +29,8 @@ Beremiz GUI и сбора измерений.
 | Узел | Назначение |
 | --- | --- |
 | ПК | Beremiz IDE/CLI, orchestration, GUI monitoring, rt-tester receiver |
-| VisionFive 2 `10.42.0.211` | source: supervisor; validated package flow: controller; network router |
-| RockPI `10.43.0.2` | source: controller; validated package flow: supervisor |
+| VisionFive 2 `10.42.0.211` | controller; network router |
+| RockPI `10.43.0.2` | supervisor с Beremiz runtime |
 | Arduino Mega | генерирует GPIO pulses и измеряет задержку ответа |
 
 Сеть:
@@ -55,21 +48,22 @@ RockPI end0 10.43.0.2 <-> VisionFive end0 10.43.0.1
 | `scripts/stand.py` | CLI точка входа source flow; также устанавливается RPM |
 | `scripts/*.sh` | legacy helpers: большинство вызывает `stand.py`, но есть самостоятельные operational scripts |
 | `scripts/check_runtime_status.py` | проверяет `PLC Status` через ERPC |
-| `profiles/visionfive-rockpi.conf` | конфигурация стенда (IP, пути, board names) |
+| `profiles/rockpi-visionfive.conf` | конфигурация стенда (IP, пути, board names) |
 
 `rt-supervisor` находится здесь: https://altlinux.space/besogon1238/rt-supervisor
+`rt-controller` находится здесь: https://altlinux.space/besogon1238/rt-controller
 
 Полезные разделы `rt-supervisor`:
 
 - `docs/runtime-abi.md`: shared memory/futex contract между supervisor и runtime;
-- `docs/boards.md`: GPIO profiles и добавление новых плат;
+- `../rt-controller/configs/boards.tsv`: GPIO profiles controller-плат;
 - `docs/altlinux-packages.md`: проверенные пакеты ALT Linux;
 - `docs/beremiz-runtime.md`: запуск Beremiz runtime через `alt-rt-supervisor -r`.
 - `docs/install-deploy.md`: source tree deploy и optional `cmake --install` layout.
 
 ## PLC-Логика
 
-RockPI отправляет в PLC значения `sensor`, `threshold` и `sequence`. PLC считает:
+VisionFive controller отправляет в PLC значения `sensor`, `threshold` и `sequence`. PLC считает:
 
 ```iecst
 alarm := sensor_value > threshold;
@@ -156,15 +150,15 @@ beremiz beremiz-project/supervised-raw-plc
 Runtime URI:
 
 ```text
-ERPC://10.42.0.211:3000
+ERPC://10.43.0.2:3000
 ```
 
 ## Важно
 
 - Для GUI/debug запускайте stack с `TIMEOUT_US=30000000`, иначе supervisor может перезапустить runtime во время polling.
-- Вручную supervisor запускается на VisionFive так: `/root/rt-supervisor/scripts/run_supervisor.sh end0 30000000 /root/beremiz-runtime/supervised-raw-plc/start_runtime.sh /root/rt-supervisor/Build/src/alt-rt-supervisor`.
-- Вручную controller запускается на RockPI так: `/root/rt-supervisor/scripts/run_controller.sh end0 /root/rt-supervisor/Build/src/controller-emu`.
-- После каждой сборки PLC на VisionFive выполняйте `scripts/sync_supervised_debug_build_from_visionfive.sh`, иначе GUI не найдет локальный `build/VARIABLES.csv`.
-- `alarm` меняется не от GUI и не от receiver, а от GPIO edges, которые RockPI получает на input line.
+- Вручную supervisor запускается на RockPI так: `/root/rt-supervisor/scripts/run_supervisor.sh end0 30000000 /root/beremiz-runtime/supervised-raw-plc/start_runtime.sh /root/rt-supervisor/Build/src/alt-rt-supervisor`.
+- Вручную controller запускается на VisionFive так: `/root/rt-controller/scripts/run_controller.sh end0 visionfive2 /root/rt-controller/Build/src/controller-emu`.
+- После каждой сборки PLC на RockPI синхронизируйте локальный `build/VARIABLES.csv`, иначе GUI не увидит debug variables.
+- `alarm` меняется не от GUI и не от receiver, а от GPIO edges на VisionFive controller.
 - Схема сети, SSH-доступ и восстановление internet routing для VisionFive/RockPI описаны в [NETWORK.md](NETWORK.md).
 - План упаковки `rt-controller`, `rt-supervisor`, `rt-tester` и helper-пакета стенда описан в [ROADMAP.md](ROADMAP.md).

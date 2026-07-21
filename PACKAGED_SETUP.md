@@ -11,18 +11,17 @@ PC -> VisionFive 2 (controller-emu, GPIO, network router) -> RockPI 4
    -> RockPI 4 (rt-supervisor + rt-supervisor-runtime-example)
 ```
 
-This differs from the source profile `profiles/visionfive-rockpi.conf`, where
-VisionFive is the supervisor and RockPI is the controller. Board role and
-network-router role are independent; VisionFive remains the router in both.
+The source profile `profiles/rockpi-visionfive.conf` uses the same board roles;
+only binary and script paths differ.
 
 ## Packages
 
 Current package set:
 
-- `beremiz-stand-tools-0.1.4-alt1` for PC-side stand orchestration and docs.
-- `rt-tester-tools-0.1.2-alt1` for PC-side measurements and observability data.
+- `beremiz-stand-tools-0.1.6-alt1` for PC-side stand orchestration and docs.
+- `rt-tester-tools-0.1.8-alt1` for PC-side measurements and observability data.
 - `rt-handler-0.1.6-alt1` for standalone GPIO on VisionFive 2.
-- `rt-controller-0.1.1-alt1` for the GPIO/raw-Ethernet controller role.
+- `rt-controller-0.1.5-alt1` for the GPIO/raw-Ethernet controller role.
 - `rt-supervisor-0.1.4-alt1` for the supervised runtime role.
 - `rt-supervisor-runtime-example-0.1.4-alt1` for `/usr/bin/runtime` used by the demo smoke config.
 
@@ -32,8 +31,8 @@ PC-side tools:
 
 ```bash
 rpm -Uvh \
-  /home/taranev/hasher/x86_64_chroot/repo/x86_64/RPMS.hasher/rt-tester-tools-0.1.2-alt1.noarch.rpm \
-  /home/taranev/hasher/x86_64_chroot/repo/x86_64/RPMS.hasher/beremiz-stand-tools-0.1.4-alt1.noarch.rpm
+  /home/taranev/hasher/x86_64_chroot/repo/x86_64/RPMS.hasher/rt-tester-tools-0.1.8-alt1.noarch.rpm \
+  /home/taranev/hasher/x86_64_chroot/repo/x86_64/RPMS.hasher/beremiz-stand-tools-0.1.6-alt1.noarch.rpm
 rt-tester-run-stand --help
 beremiz-stand --help
 ```
@@ -66,7 +65,7 @@ The profile selection precedence is:
 1. explicit `--profile /path/to/stand.conf`;
 2. `BEREMIZ_STAND_PROFILE`;
 3. `/etc/beremiz-stand/stand.conf` through the packaged wrapper;
-4. `profiles/visionfive-rockpi.conf` when running `scripts/stand.py` directly
+4. `profiles/rockpi-visionfive.conf` when running `scripts/stand.py` directly
    from a checkout with neither override.
 
 Every profile must contain `[pc]`, `[supervisor]`, `[controller]` and
@@ -79,9 +78,9 @@ VisionFive 2, controller side and standalone GPIO:
 
 ```bash
 scp /home/taranev/hasher/riscv64_chroot/repo/riscv64/RPMS.hasher/rt-handler-0.1.6-alt1.riscv64.rpm \
-    /home/taranev/hasher/riscv64_chroot/repo/riscv64/RPMS.hasher/rt-controller-0.1.1-alt1.riscv64.rpm \
+    /home/taranev/hasher/riscv64_chroot/repo/riscv64/RPMS.hasher/rt-controller-0.1.5-alt1.riscv64.rpm \
     root@10.42.0.211:/tmp/
-ssh root@10.42.0.211 'rpm -Uvh /tmp/rt-handler-0.1.6-alt1.riscv64.rpm /tmp/rt-controller-0.1.1-alt1.riscv64.rpm'
+ssh root@10.42.0.211 'rpm -Uvh /tmp/rt-handler-0.1.6-alt1.riscv64.rpm /tmp/rt-controller-0.1.5-alt1.riscv64.rpm'
 ```
 
 RockPI 4, supervised runtime side:
@@ -116,7 +115,7 @@ Run the supervised smoke entirely from installed package content:
 
 ```bash
 rt-tester-run-stand \
-  --config /usr/share/rt-tester-tools/configs/stands/rockpi-plc-visionfive2-controller.conf \
+  --config /usr/share/rt-tester-tools/configs/stands/rockpi-beremiz-visionfive2-controller.conf \
   --groups 1 \
   --no-prometheus \
   --no-grafana \

@@ -4,6 +4,7 @@
 [pc]
 rt_tester_dir = /usr/share/rt-tester-tools
 rt_supervisor_dir = /path/to/rt-supervisor
+rt_controller_dir = /path/to/rt-controller
 arduino_port = /dev/ttyACM0
 ethernet_iface = enp2s0
 ethernet_connection = stand-wired
@@ -34,9 +35,11 @@ runtime_dir = /root/beremiz-runtime/supervised-raw-plc
 runtime_bind_ip = 10.43.0.2
 runtime_port = 3000
 supervisor_bin = /usr/bin/alt-rt-supervisor
+runner = /usr/share/rt-supervisor/scripts/run_supervisor.sh
+trace_exporter = /usr/share/rt-supervisor/scripts/trace_exporter.py
 runtime_wrapper = /usr/bin/runtime
 erpc_url = ERPC://10.43.0.2:3000
-pinning_script = /usr/share/rt-supervisor/scripts/pin_rockpi_supervised.sh
+pinning_script = /usr/share/rt-supervisor/scripts/pin_stand.sh /usr/share/rt-supervisor/configs/stand/supervised-rockpi4.conf
 
 [controller]
 ssh = root@10.42.0.211
@@ -50,9 +53,11 @@ pc_route = 10.42.0.0/24
 pc_gateway = 10.42.0.211
 uart = /dev/ttyUSB0
 uart_baud = 1500000
-rt_supervisor_dir = /root/rt-controller
+rt_controller_dir = /root/rt-controller
 controller_bin = /usr/bin/controller-emu
-pinning_script = /usr/share/rt-controller/scripts/pin_stand.sh
+runner = /usr/share/rt-controller/scripts/run_controller.sh
+trace_exporter = /usr/share/rt-controller/scripts/trace_exporter.py
+pinning_script = /usr/share/rt-controller/scripts/pin_stand.sh /usr/share/rt-controller/configs/stand/controller-visionfive2.conf
 
 [measurement]
 params = /usr/share/rt-tester-tools/src/pc-receiver/measurement-supervised-smoke.conf

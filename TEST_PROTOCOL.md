@@ -40,8 +40,8 @@ ssh root@10.42.0.211 'ssh root@10.43.0.2 true'
 На платах должны быть штатные binaries:
 
 ```text
-VisionFive: /root/rt-supervisor/Build/src/alt-rt-supervisor
-RockPI:     /root/rt-supervisor/Build/src/controller-emu
+RockPI:     /root/rt-supervisor/Build/src/alt-rt-supervisor
+VisionFive: /root/rt-controller/Build/src/controller-emu
 ```
 
 Arduino должен быть подключен к ПК как `/dev/ttyACM0`. Если порт другой:
@@ -65,6 +65,7 @@ PLC Status: Started
 trace_mode=off
 groups=2
 latencies=150
+```
 
 Если `measurement-supervised-smoke.conf` настроен на 1500 измерений в группе,
 то для `SMOKE_GROUPS=2` Arduino выполнит 3000 физических измерений, а receiver
